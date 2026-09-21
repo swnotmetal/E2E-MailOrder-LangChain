@@ -1,0 +1,10 @@
+From: buyer@example.invalid
+To: sales@example.invalid
+Subject: DEMO-008
+Content-Type: text/plain; charset=utf-8
+
+Customer: Unknown Workshop
+PO: DEMO-008
+Delivery: 2027-02-20
+Address: 10 Test Road, Helsinki, 00100, Finland
+Item: FILTER-A10 | 5 | Nos

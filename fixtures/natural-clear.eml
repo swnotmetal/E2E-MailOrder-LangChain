@@ -1,0 +1,6 @@
+From: buyer@example.invalid
+To: sales@example.invalid
+Subject: purchase request
+Content-Type: text/plain; charset=utf-8
+
+Acme Workshop is placing PO DEMO-NL-01. Please send 5 units of FILTER-A10, unit Nos. We need delivery on 2027-02-20 to 10 Test Road, Helsinki, 00100, Finland.

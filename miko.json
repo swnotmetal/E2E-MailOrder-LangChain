@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/koma-miko/schema/miko.schema.json",
+  "version": 1,
+  "specs": [
+    {
+      "id": "order-write-and-review",
+      "appliesWhen": {
+        "action": {
+          "tools": [
+            "apply_patch",
+            "Edit",
+            "Write"
+          ],
+          "pathPrefixes": [
+            "src/workflow.ts",
+            "src/erp.ts",
+            "src/domain.ts"
+          ]
+        }
+      },
+      "requires": {
+        "skills": [
+          {
+            "name": "order-review",
+            "reloadAfterCompaction": true
+          }
+        ]
+      },
+      "mode": "enforce"
+    }
+  ]
+}

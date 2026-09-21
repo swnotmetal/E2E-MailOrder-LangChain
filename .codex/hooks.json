@@ -1,0 +1,64 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./node_modules/koma-miko/dist/codex-hook-cli.js",
+            "timeout": 10,
+            "statusMessage": "Miko is checking the Agent Spec"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./node_modules/koma-miko/dist/codex-hook-cli.js",
+            "timeout": 10,
+            "statusMessage": "Miko is checking the Agent Spec"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./node_modules/koma-miko/dist/codex-hook-cli.js",
+            "timeout": 10,
+            "statusMessage": "Miko is checking the Agent Spec"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./node_modules/koma-miko/dist/codex-hook-cli.js",
+            "timeout": 10,
+            "statusMessage": "Miko is checking the Agent Spec"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./node_modules/koma-miko/dist/codex-hook-cli.js",
+            "timeout": 10,
+            "statusMessage": "Miko is checking the Agent Spec"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+From: buyer@example.invalid
+To: sales@example.invalid
+Subject: purchase request
+Content-Type: text/plain; charset=utf-8
+
+Acme Workshop sends PO DEMO-NL-02. Please ship 5 Nos of the Filter series for 2027-02-20. Destination: 10 Test Road, Helsinki, 00100, Finland.

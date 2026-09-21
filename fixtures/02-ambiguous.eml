@@ -1,0 +1,10 @@
+From: buyer@example.invalid
+To: sales@example.invalid
+Subject: DEMO-002
+Content-Type: text/plain; charset=utf-8
+
+Customer: Acme Workshop
+PO: DEMO-002
+Delivery: 2027-02-20
+Address: 10 Test Road, Helsinki, 00100, Finland
+Item: Filter | 5 | Nos

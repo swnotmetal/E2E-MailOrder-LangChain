@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+data/
+infra/frappe_docker/
+*.log
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/order-review/
+
+# Miko local session state
+.miko/state/
+__pycache__/
