@@ -13,6 +13,8 @@ const State = Annotation.Root({
   audit:Annotation<unknown[]>({reducer:(a,b)=>a.concat(b),default:()=>[]})
 });
 
+export type InquiryReplyDrafter=(inquiry:InquiryCase)=>Promise<{draft:string;language?:string;traceId?:string;model?:string}>;
+
 function matchingItems(items:Item[],text:string) {
   const exact=items.filter(i=>[i.name,i.item_name].some(v=>normalize(v)===normalize(text)));
   if(exact.length)return exact;
@@ -76,7 +78,11 @@ function draftInquiryReply(senderName:string,lines:InquiryLine[],language:string
   return `Hello${senderName?` ${senderName}`:''},\n\nThank you for your inquiry. We checked the current catalog and read-only inventory records:\n\n${details}\n\nPrices and your requested delivery date still need human confirmation. We will send a confirmed quotation after those checks; this message does not reserve stock or promise delivery.\n\nBest regards,\nSales team`;
 }
 
-export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor) {
+const templateReplyDrafter:InquiryReplyDrafter=async inquiry=>({
+  draft:draftInquiryReply(inquiry.senderName,inquiry.lines,inquiry.replyLanguage),language:inquiry.replyLanguage
+});
+
+export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor, draftReply:InquiryReplyDrafter=templateReplyDrafter) {
   async function checkERP(d:Draft) {
     const [customers,items,addresses] = await Promise.all([erp.customers(),erp.items(),d.customer?erp.addresses(d.customer):Promise.resolve([])]);
     const issues = validate(d);
@@ -124,10 +130,16 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const intent=s.extracted.intent?.kind as InquiryCase['intent'];
       const sourceText=s.sources.find(source=>source.source==='email')?.text??s.sources[0]?.text??'';
       const language=replyLanguage(sourceText,s.extracted.reply?.language);
-      const responseDraft=draftInquiryReply(senderName,lines,language);
       const inquiry:InquiryCase={intent,customerText,senderName,
-        customer:customerMatches.length===1?customerMatches[0].name:'',lines,condition,needs,replyLanguage:language,responseDraft};
-      return {inquiry,customers,items,issues:[],revision:digest([s.sources,inquiry]),status:'inquiry-review'};
+        customer:customerMatches.length===1?customerMatches[0].name:'',lines,condition,requestedDate:value('date'),needs,replyLanguage:language,responseDraft:''};
+      return {inquiry,customers,items,issues:[],status:'inquiry-prepared'};
+    })
+    .addNode('draftInquiryReply',async s=>{
+      const reply=await draftReply(s.inquiry);
+      if(!reply.draft.trim()) throw Error('MODEL_REPLY_EMPTY');
+      const inquiry:InquiryCase={...s.inquiry,responseDraft:reply.draft.trim(),replyLanguage:reply.language??s.inquiry.replyLanguage,
+        replyTraceId:reply.traceId,replyModel:reply.model};
+      return {inquiry,revision:digest([s.sources,inquiry]),status:'inquiry-review'};
     })
     .addNode('inquiryReview',s=>{
       let feedback='';
@@ -192,7 +204,8 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
     })
     .addEdge(START,'extract')
     .addConditionalEdges('extract',s=>s.extracted.intent && s.extracted.intent.kind!=='purchase'?'prepareInquiry':'match',['prepareInquiry','match'])
-    .addEdge('prepareInquiry','inquiryReview')
+    .addEdge('prepareInquiry','draftInquiryReply')
+    .addEdge('draftInquiryReply','inquiryReview')
     .addConditionalEdges('inquiryReview',s=>s.status==='inquiry-review'?'inquiryReview':END,['inquiryReview',END])
     .addEdge('match','review')
     .addConditionalEdges('review',s=>s.status==='approved'?'write':s.status==='needs-info'?'review':END,['write','review',END])

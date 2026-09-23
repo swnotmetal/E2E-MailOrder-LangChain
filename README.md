@@ -15,7 +15,7 @@ All examples and fixture records are fictional. The project deliberately has no 
 - idempotency and reconciliation after uncertain writes;
 - explicit separation of mock tests, live integration evidence, and unverified claims.
 
-Current evidence: a local ERPNext instance has previously completed human-approved Draft creation and duplicate-order checks; Gemini natural-language extraction and read-only inventory lookup have also been exercised. A successful LangSmith tool trace is still pending. See [the learning handoff](docs/learning-handoff-2026-09-21.md) and [model notes](docs/model.md) for the precise evidence status.
+Current evidence: a local ERPNext instance has previously completed human-approved Draft creation and duplicate-order checks; Gemini natural-language extraction, grounded same-language reply drafting, and read-only inventory lookup have also been exercised. Successful LangSmith extraction and reply traces exist; a successful standalone inventory-tool trace is still pending. See [the learning handoff](docs/learning-handoff-2026-09-21.md) and [model notes](docs/model.md) for the precise evidence status.
 
 ## Quick start
 

@@ -21,8 +21,8 @@ export type InquiryLine = {
 };
 export type InquiryCase = {
   intent:'inquiry'|'conditional'|'unclear'; customerText:string; senderName:string; customer:string;
-  lines:InquiryLine[]; condition:string;
-  needs:string[]; replyLanguage:string; responseDraft:string;
+  lines:InquiryLine[]; condition:string; requestedDate:string;
+  needs:string[]; replyLanguage:string; responseDraft:string; replyTraceId?:string; replyModel?:string;
 };
 export const DraftSchema = z.object({
   customer: z.string(), po: z.string(), date: z.string(), address: z.string(),

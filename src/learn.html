@@ -34,7 +34,9 @@ function outcome(){
   if(!current)return;
   const s=current, codes=(s.values.issues??[]).map(x=>x.code);
   if(s.error){
-    const text='理解阶段失败：'+s.error+'。尚未完成订单/询价路由，目录与库存查询没有运行，也没有创建订单。';
+    const replyFailed=s.values.status==='inquiry-prepared';
+    const text=replyFailed?'回复生成失败：'+s.error+'。邮件理解与只读库存查询已经完成，但没有可供批准的回复草稿，也没有写入 ERP。'
+      :'理解阶段失败：'+s.error+'。尚未完成订单/询价路由，目录与库存查询没有运行，也没有创建订单。';
     message('lesson',text);message('blocker',text+' 这属于技术失败；请检查模型输出或服务状态后重试，不要通过猜测修改客户原文。');message('editFeedback','');$('status').textContent=text;return;
   }
   if(s.values.status==='response-approved'){
@@ -88,11 +90,12 @@ function render(s,preservedDraft){
   $('identityFacts').textContent=`公司：${first('customer')} · 发件人：${first('sender')} · 公司/发件人所在地：${first('location')} · 明确送货地址：${first('address')}`;
   $('summary').textContent=`状态 ${s.values.status??'理解失败'} · ${s.pending.length?'等待人工审核':s.error?'报错停止':'下个节点 '+(s.next.join(', ')||'END')} · 模拟写入累计 ${s.mockWrites} · thread ${s.id}`;
   $('sources').textContent=(s.values.sources??[]).map(x=>`${x.source} / page ${x.page}\n${x.text}`).join('\n\n');
-  $('issues').textContent=pretty(s.error?{route:'understanding-error',error:s.error,pending:[]}:s.values.inquiry?{route:'inquiry',inquiry:s.values.inquiry,pending:s.pending}:{route:'order',issues:s.values.issues,pending:s.pending});
+  const replyFailed=s.error&&s.values.status==='inquiry-prepared';
+  $('issues').textContent=pretty(s.error?{route:replyFailed?'reply-error':'understanding-error',error:s.error,inquiry:replyFailed?s.values.inquiry:undefined,pending:[]}:s.values.inquiry?{route:'inquiry',inquiry:s.values.inquiry,pending:s.pending}:{route:'order',issues:s.values.issues,pending:s.pending});
   $('draft').value=preservedDraft??pretty(s.values.draft??null);
-  const inquiry=s.values.inquiry;$('inquiryPanel').hidden=!inquiry||!!s.error;$('orderPanel').hidden=!!inquiry||!!s.error;
+  const inquiry=s.values.inquiry;$('inquiryPanel').hidden=!inquiry||!!s.error&&!replyFailed;$('orderPanel').hidden=!!inquiry||!!s.error;
   if(inquiry){
-    $('inquiryFacts').textContent=`公司原文：${inquiry.customerText||'未识别'} · 发件人：${inquiry.senderName||'未识别'} · 回复语言：${inquiry.replyLanguage||'未识别'} · ERP 客户：${inquiry.customer||'未匹配'} · 商品行：${inquiry.lines.length}`;
+    $('inquiryFacts').textContent=`公司原文：${inquiry.customerText||'未识别'} · 发件人：${inquiry.senderName||'未识别'} · 回复语言：${inquiry.replyLanguage||'未识别'} · ERP 客户：${inquiry.customer||'未匹配'} · 商品行：${inquiry.lines.length}${inquiry.replyModel?' · 回复模型：'+inquiry.replyModel:''}${inquiry.replyTraceId?' · 回复 trace：'+inquiry.replyTraceId:''}`;
     $('inquiryLines').replaceChildren(...inquiry.lines.map(x=>{const li=document.createElement('li');const stock=x.inventory?.totalActualQty;li.textContent=`${x.itemText||'未识别'} → ${x.itemCode||'未唯一匹配'} · 数量 ${x.quantity||'未识别'} · ${x.status}${stock===null||stock===undefined?'':' · 记录库存 '+stock}`;return li;}));
     $('inquiryNeeds').replaceChildren(...inquiry.needs.map(x=>{const li=document.createElement('li');li.textContent=x;return li;}));
     $('reply').value=inquiry.responseDraft;
@@ -104,7 +107,7 @@ function render(s,preservedDraft){
   }
   $('events').textContent=pretty(s.events);$('state').textContent=pretty(s);
   $('reload').disabled=false;outcome();renderForm();
-  $('progress').textContent=s.error?'流程报错：'+s.error:s.values.status==='created'?'订单：✓ 理解 → ✓ 校验 → ✓ 人工批准 → ✓ Mock ERP 草稿 '+s.values.order:s.values.status==='response-approved'?'询价：✓ 理解 → ✓ 库存查询 → ✓ 人工批准回复草稿':s.values.inquiry?'询价：✓ 理解 → ✓ 库存查询 → ⏸ 回复审核':'订单：✓ 理解 → ✓ 匹配 → ⏸ 订单审核';
+  $('progress').textContent=s.error?(s.values.status==='inquiry-prepared'?'询价：✓ 理解 → ✓ 库存查询 → ✗ 回复生成：':'流程报错：')+s.error:s.values.status==='created'?'订单：✓ 理解 → ✓ 校验 → ✓ 人工批准 → ✓ Mock ERP 草稿 '+s.values.order:s.values.status==='response-approved'?'询价：✓ 理解 → ✓ 库存查询 → ✓ 人工批准回复草稿':s.values.inquiry?'询价：✓ 理解 → ✓ 库存查询 → ✓ 回复生成 → ⏸ 回复审核':'订单：✓ 理解 → ✓ 匹配 → ⏸ 订单审核';
 }
 async function run(fn){
   $('status').textContent='正在执行…';document.querySelectorAll('button').forEach(b=>b.disabled=true);

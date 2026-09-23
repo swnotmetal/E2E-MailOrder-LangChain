@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { geminiExtractor, geminiInventoryAnswer, inventoryTool, verifyModelProposal, verifyMailProposal } from '../src/model.js';
+import { geminiExtractor, geminiInquiryReply, geminiInventoryAnswer, inventoryTool, verifyModelProposal, verifyMailProposal } from '../src/model.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
-import { type Source } from '../src/domain.js';
+import { type InquiryCase, type Source } from '../src/domain.js';
 const sources:Source[]=[{source:'email',page:0,text:'I am Mia Example from Acme Workshop. Please order 5 FILTER-A10 (Nos), PO ABC-1, delivery 2027-02-20 to 10 Test Road.'}];
 const span=(quote:string,value=quote)=>({sourceIndex:0,quote,value});
 const facts={facts:{customer:[span('Acme Workshop')],sender:[span('Mia Example')],location:[],po:[span('PO ABC-1','ABC-1')],date:[span('2027-02-20')],address:[span('10 Test Road')]},
@@ -79,6 +79,35 @@ test('inventory tool is read-only and preserves unavailable stock as unknown',as
   const result=await inventory.invoke({itemCode:'FILTER-A10'});
   assert.equal(requested,'FILTER-A10');
   assert.deepEqual(result,{itemCode:'FILTER-A10',itemName:'Filter A10',stockTracked:false,totalActualQty:null,warehouses:[]});
+});
+test('Gemini drafts an inquiry reply from structured ERP results in the requested language',async(t)=>{
+  const dir=await mkdtemp(join(tmpdir(),'gemini-reply-'));
+  const originalKey=process.env.GOOGLE_API_KEY, originalTrace=process.env.ORDER_TRACE;
+  process.env.GOOGLE_API_KEY='fictional-test-key';process.env.ORDER_TRACE='false';
+  let requests=0;
+  t.mock.method(globalThis,'fetch',async(url:unknown,init:RequestInit)=>{
+    requests++;
+    assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent');
+    const body=JSON.parse(init.body as string);
+    assert.equal(body.tools[0].functionDeclarations[0].name,'draft_inquiry_reply');
+    assert.equal(body.toolConfig.functionCallingConfig.mode,'ANY');
+    const input=JSON.parse(body.contents[0].parts[0].text);
+    assert.equal(input.language,'fi');assert.equal(input.requestedDate,'15. lokakuuta 2026');assert.equal(input.lines[0].status,'out-of-stock');assert.equal(input.lines[0].inventory.totalActualQty,0);
+    return Response.json({candidates:[{content:{parts:[{functionCall:{name:'draft_inquiry_reply',args:{draft:'Hei Matti,\n\nFILTER-A20: pyydetty määrä 10, ERP:n kirjattu saldo 0. Hinta ja toimitus 15. lokakuuta 2026 mennessä vahvistetaan erikseen.\n\nYstävällisin terveisin,\nMyyntitiimi'}}}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:30}});
+  });
+  const inquiry:InquiryCase={intent:'inquiry',customerText:'Fictional Oy',senderName:'Matti',customer:'',condition:'saatavuutta',requestedDate:'15. lokakuuta 2026',
+    lines:[{itemText:'Filter A20',itemCode:'FILTER-A20',quantity:'10',status:'out-of-stock',inventory:{stockTracked:true,totalActualQty:0}}],
+    needs:['确认适用价格','确认客户要求的交期能否满足'],replyLanguage:'fi',responseDraft:''};
+  try {
+    const result=await geminiInquiryReply(dir)(inquiry);
+    assert.equal(requests,1);assert.equal(result.language,'fi');assert.equal(result.model,'gemini-2.5-flash-lite');assert.match(result.draft,/Hei Matti/);
+    const ledger=SqliteSaver.fromConnString(join(dir,'model-budget.sqlite'));
+    try {assert.equal((ledger.db.prepare('SELECT count(*) AS count FROM model_budget').get() as {count:number}).count,1);} finally {ledger.db.close();}
+  } finally {
+    if(originalKey===undefined) delete process.env.GOOGLE_API_KEY; else process.env.GOOGLE_API_KEY=originalKey;
+    if(originalTrace===undefined) delete process.env.ORDER_TRACE; else process.env.ORDER_TRACE=originalTrace;
+    await rm(dir,{recursive:true,force:true});
+  }
 });
 test('Gemini paths preserve history without a local cap and stop on quota errors',async(t)=>{
   const dir=await mkdtemp(join(tmpdir(),'gemini-policy-'));

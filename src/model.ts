@@ -4,7 +4,7 @@ import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { tool } from '@langchain/core/tools';
 import { Client, RunTree } from 'langsmith';
 import { z } from 'zod';
-import { type Extraction, type Fact, type Source } from './domain.js';
+import { type Extraction, type Fact, type InquiryCase, type Source } from './domain.js';
 import { type FrappeERP, type Inventory } from './erp.js';
 import { verifyEvidence } from './input.js';
 
@@ -143,6 +143,35 @@ export function geminiMailExtractor(dataDir:string) {
       if(trace){await trace.end({extraction:result,usage:response.usage});await trace.patchRun();result.traceId=trace.id;}
       return result;
     }catch(error){if(trace){await trace.end(undefined,error instanceof Error?error.message:'Unknown error');await trace.patchRun().catch(()=>{});}throw error;}
+  };
+}
+
+const inquiryReplyProposal=z.object({draft:z.string().trim().min(1).max(5000)
+  .refine(value=>!(/https?:\/\//i.test(value)),'Reply must not contain links')});
+export function geminiInquiryReply(dataDir:string) {
+  return async(inquiry:InquiryCase)=>{
+    const input=JSON.stringify({language:inquiry.replyLanguage,senderName:inquiry.senderName,intent:inquiry.intent,
+      condition:inquiry.condition,requestedDate:inquiry.requestedDate,lines:inquiry.lines,needs:inquiry.needs});
+    if(Buffer.byteLength(input,'utf8')>10000) throw Error('MODEL_REPLY_INPUT_LIMIT');
+    const trace=process.env.ORDER_TRACE==='true' && process.env.LANGSMITH_API_KEY?new RunTree({name:'fictional-inquiry-reply',run_type:'llm',
+      project_name:process.env.LANGSMITH_PROJECT??'order-review-demo',inputs:{inquiry:JSON.parse(input),model:MODEL_ID},
+      client:new Client({apiKey:process.env.LANGSMITH_API_KEY,apiUrl:process.env.LANGSMITH_ENDPOINT})}):undefined;
+    if(trace)await trace.postRun();
+    try {
+      const response=await budgetedGeminiCall(dataDir,{generationConfig:generationConfig(2000),
+        systemInstruction:{parts:[{text:'Draft a concise customer-service reply for a fictional inquiry using only the supplied structured facts. Write the entire reply in the requested BCP-47 language, regardless of company name or location. Address the grounded sender when present and cover every product line exactly once. For every line, preserve the product description, exact item code when present, and requested quantity. recorded-stock is only an ERP snapshot: state the recorded quantity but never promise availability, allocation, delivery, or fulfillment. out-of-stock means the recorded quantity is zero. unresolved means no unique catalog item was found; ask for the exact item code without claiming the product does not exist. untracked and lookup-failed require human confirmation. When requestedDate is non-empty, acknowledge that exact customer-provided date and state that it still requires confirmation; otherwise state generally that delivery timing requires confirmation. State that prices require confirmation. Never invent prices, dates, quantities, item matches, orders, payment details, links, or contact information. Do not claim that an email was sent or an order was created. Sign as Sales team in the requested language. Return draft_inquiry_reply.'}]},
+        contents:[{role:'user',parts:[{text:input}]}],tools:[{functionDeclarations:[{name:'draft_inquiry_reply',description:'A grounded reply draft for human review',parametersJsonSchema:z.toJSONSchema(inquiryReplyProposal)}]}],
+        toolConfig:{functionCallingConfig:{mode:'ANY',allowedFunctionNames:['draft_inquiry_reply']}}});
+      const call=response.content.find(c=>c.type==='tool_use'&&c.name==='draft_inquiry_reply');
+      if(!call)throw Error('MODEL_NO_REPLY_DRAFT');
+      const parsed=inquiryReplyProposal.parse(call.input);
+      const result={draft:parsed.draft,language:inquiry.replyLanguage,model:MODEL_ID,traceId:trace?.id};
+      if(trace){await trace.end({...result,usage:response.usage});await trace.patchRun();}
+      return result;
+    } catch(error) {
+      if(trace){await trace.end(undefined,error instanceof Error?error.message:'Unknown error');await trace.patchRun().catch(()=>{});}
+      throw error;
+    }
   };
 }
 

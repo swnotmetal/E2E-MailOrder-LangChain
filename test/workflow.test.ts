@@ -165,6 +165,36 @@ test('inquiry fallback reply follows a Chinese customer message',async()=>{
     assert.doesNotMatch(s.values.inquiry.responseDraft,/Our team/);assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });
+test('reply drafting runs after read-only inventory and preserves the requested language',async()=>{
+  const x=await setup();try{
+    const text='Hei, olen Matti. Kysyisin 10 FILTER-A20 tuotteen saatavuutta ja hintaa.';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const empty={value:'',evidence:{source:'email' as const,page:0,start:0,end:0,quote:''}};
+    let received:any;
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[],sender:[fact('Matti')],location:[],po:[],date:[],address:[]},
+      intent:{kind:'inquiry' as const,evidence:fact('Kysyisin')},reply:{language:'fi'},lines:[{description:fact('FILTER-A20'),quantity:fact('10'),unit:empty}]}),
+      async inquiry=>{received=inquiry;return {draft:'Hei Matti,\n\nFILTER-A20-tuotteen ERP-saldo on 0. Hinta ja toimitusaika vahvistetaan erikseen.\n\nYstävällisin terveisin,\nMyyntitiimi',language:'fi',model:'gemini-2.5-flash-lite',traceId:'fictional-reply-trace'};});
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('finnish-reply'));
+    const s=await graph.getState(config('finnish-reply'));
+    assert.equal(received.lines[0].inventory.totalActualQty,0);assert.equal(received.lines[0].status,'out-of-stock');
+    assert.equal(s.values.status,'inquiry-review');assert.equal(s.values.inquiry.replyLanguage,'fi');assert.match(s.values.inquiry.responseDraft,/Hei Matti/);
+    assert.equal(s.values.inquiry.replyModel,'gemini-2.5-flash-lite');assert.equal(s.values.inquiry.replyTraceId,'fictional-reply-trace');assert.equal(x.mock.posts,0);
+  }finally{await x.close();}
+});
+test('reply model failure preserves prepared inventory state and never reaches review or ERP write',async()=>{
+  const x=await setup();try{
+    const text='Hello, is 10 FILTER-A20 available?';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const empty={value:'',evidence:{source:'email' as const,page:0,start:0,end:0,quote:''}};
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[],sender:[],location:[],po:[],date:[],address:[]},
+      intent:{kind:'inquiry' as const,evidence:fact('available')},reply:{language:'en'},lines:[{description:fact('FILTER-A20'),quantity:fact('10'),unit:empty}]}),
+      async()=>{throw Error('GEMINI_HTTP_429');});
+    await assert.rejects(graph.invoke({sources:[{source:'email',page:0,text}]},config('reply-failure')),/GEMINI_HTTP_429/);
+    const s=await graph.getState(config('reply-failure'));
+    assert.equal(s.values.status,'inquiry-prepared');assert.equal(s.values.inquiry.lines[0].inventory.totalActualQty,0);
+    assert.equal(s.values.inquiry.responseDraft,'');assert.equal(s.tasks.length,1);assert.equal(s.tasks[0].name,'draftInquiryReply');assert.equal(x.mock.posts,0);
+  }finally{await x.close();}
+});
 test('multi-product English inquiry reports every read-only ERP result and ignores company locale',async()=>{
   const x=await setup();try{
     const text=`TALLINNA KLIIMATEHNIKA OÜ Narva mnt 7, 10117 Tallinn, Estonia\nToomas Tamm, Procurement Manager\nHello,\nWe are looking for a non-binding price quote and availability information. We are interested in these products:\n* 10x Filter A20\n* 12x Radiaatori ventiil H-4\n* 15x Smart Thermostat V1\n* 5x Thermostat X-200\n* 8x Õhufilter Carbon-X\n* 20x Filter\nAre there any expected supply shortages? Please let us know if you can fully deliver the goods. We need the items by October 15, 2026, at the latest.\nThanks in advance for a quick response!\nBest regards,\nToomas Tamm`;

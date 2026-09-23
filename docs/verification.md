@@ -1,5 +1,11 @@
 > 2026-09-22 当前约束：所有后续模型调用严格只用 Gemini 2.5 Flash-Lite（`gemini-2.5-flash-lite`），使用 GOOGLE_API_KEY / ORDER_EXTRACTOR=gemini。下文旧供应商记录仅为历史，不构成继续调用的授权。用户已于 2026-09-22 撤销两次 / $0.05 本地限制，保留历史账本；额度或限流错误停止，不自动重试或切换。下文预算限制仅为历史记录；已发生一次旧供应商 401 请求。
 
+## 2026-09-23 ERP 后同语种回复节点
+
+- 使用虚构芬兰语询价真实运行固定模型两次：抽取 trace `01a0cf4f-2af2-7000-8000-0014486bc30f`，回复 trace `01a0cf4f-33d6-7000-8000-0365cc84ca3d`。
+- 回复节点只收到结构化询价与只读 ERP 结果；芬兰语草稿保留五项请求数量 `25 / 12 / 40 / 8 / 15` 及原文日期 `15. lokakuuta 2026`。五个商品均未匹配当前目录，因此要求确认商品编码；没有把“未匹配”表述成“企业绝不供应”。
+- 图停在 `inquiry-review` 等待人工审核，Mock ERP 写入为 `0`。Mock 回归另行证明回复模型 429 时 checkpoint 保留 `inquiry-prepared` 库存结果，不产生待批准草稿或 ERP 写入。该验证不证明芬兰语文案质量或真实业务准确率。
+
 ## 2026-09-23 自然语言身份字段切片
 
 - 真实 Gemini 2.5 Flash-Lite 请求，输入仅为虚构文本：成功分别提取公司 `Nieminen Auto Workshop`、联系人 `Mia Example` 与明确送货地址 `99 Fictional Road, Helsinki`；路由到 `conditional` 询价审核；回复称呼为 `Hello Mia Example,`；Mock ERP 写入数为 `0`。

@@ -10,7 +10,7 @@ import { FrappeERP } from '../src/erp.js';
 import { workflow } from '../src/workflow.js';
 import { readSources } from '../src/input.js';
 import { DecisionSchema, InquiryDecisionSchema } from '../src/domain.js';
-import { inventoryTool, geminiMailExtractor } from '../src/model.js';
+import { inventoryTool, geminiInquiryReply, geminiMailExtractor } from '../src/model.js';
 import { resolve } from 'node:path';
 
 export async function startLearningLab(port=3210) {
@@ -33,7 +33,7 @@ export async function startLearningLab(port=3210) {
   };
   const saver=SqliteSaver.fromConnString(':memory:');
   const graph=workflow(erp,saver);
-  const modelGraph=workflow(erp,saver,geminiMailExtractor(resolve('data')));
+  const modelGraph=workflow(erp,saver,geminiMailExtractor(resolve('data')),geminiInquiryReply(resolve('data')));
   const threads=new Set<string>();
   const mailbox=new Map<string,{subject:string;events:unknown[];error?:string}>();
   const inventory=inventoryTool(erp);
