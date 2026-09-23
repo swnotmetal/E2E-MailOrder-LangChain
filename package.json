@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
-    "koma-miko": "^0.1.0-alpha.11",
+    "koma-miko": "^0.1.0-alpha.12",
     "pdf-lib": "^1.17.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
