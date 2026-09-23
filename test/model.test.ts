@@ -15,7 +15,7 @@ test('mail intent is grounded and missing line fields stay unresolved',()=>{
     reply:{language:'en',draft:'Hello Mia, we are checking availability, price, and delivery timing.'}};
   const result=verifyMailProposal(raw,sources);
   assert.equal(result.intent?.kind,'conditional');assert.equal(result.facts.sender[0].value,'Mia Example');assert.equal(result.lines[0].quantity.value,'');assert.equal(result.lines[0].unit.value,'');
-  assert.throws(()=>verifyMailProposal({...raw,intentEvidence:span('invented confirmation')},sources),/MODEL_QUOTE_NOT_UNIQUE/);
+  assert.throws(()=>verifyMailProposal({...raw,intentEvidence:span('invented confirmation')},sources),/MODEL_QUOTE_NOT_FOUND/);
   const spaced=verifyMailProposal({...raw,lines:[{description:span('FILTER-A10'),quantity:span('5FILTER-A10','5'),unit:null}]},sources);
   assert.equal(spaced.lines[0].quantity.value,'5');
   assert.equal(spaced.lines[0].quantity.evidence.start,sources[0].text.indexOf('5'));
@@ -23,11 +23,42 @@ test('mail intent is grounded and missing line fields stay unresolved',()=>{
 test('model results become facts only when every quote is grounded in the source',()=>{
   const e=verifyModelProposal(facts,sources);
   assert.equal(e.lines[0].quantity.value,'5');assert.equal(e.lines[0].quantity.evidence.start,sources[0].text.indexOf('5 FILTER-A10'));
-  assert.throws(()=>verifyModelProposal({...facts,facts:{...facts.facts,customer:[span('Invisible Customer')]}},sources),/MODEL_QUOTE_NOT_UNIQUE/);
+  assert.throws(()=>verifyModelProposal({...facts,facts:{...facts.facts,customer:[span('Invisible Customer')]}},sources),/MODEL_QUOTE_NOT_FOUND/);
 });
-test('ambiguous repeated quotes cannot be silently grounded',()=>{
+test('repeated exact facts remain grounded at a deterministic source offset',()=>{
   const repeated:Source[]=[{source:'email',page:0,text:'PO ABC-1. PO ABC-1.'}];
-  assert.throws(()=>verifyModelProposal({...facts,facts:{...facts.facts,po:[span('PO ABC-1','ABC-1')]}},repeated),/MODEL_QUOTE_NOT_UNIQUE/);
+  const result=verifyModelProposal({facts:{customer:[],sender:[],location:[],po:[span('PO ABC-1','ABC-1')],date:[],address:[]},lines:[]},repeated);
+  assert.equal(result.facts.po[0].value,'ABC-1');
+  assert.equal(result.facts.po[0].evidence.start,3);
+});
+test('mail line fields use their closest grounded combination when individual quotes repeat',()=>{
+  const text='Sehr geehrte Damen und Herren, wir sind an einigen Ihrer Produkte interessiert. 15x Smart Thermostat V1 10x Filter A20 5x Thermostat X-200 20x Filter. Lieferung bis 15. Oktober 2026. Mit freundlichen Grüßen Lukas Weber, Weber Gebäudetechnik GmbH';
+  const german:Source[]=[{source:'email',page:0,text}];
+  const s=(quote:string,value=quote)=>({sourceIndex:0,quote,value});
+  const raw={intent:'inquiry',intentEvidence:s('interessiert'),facts:{customer:[s('Weber Gebäudetechnik GmbH')],sender:[s('Lukas Weber')],location:[],po:[],date:[s('15. Oktober 2026')],address:[]},
+    lines:[
+      {description:s('Smart Thermostat V1'),quantity:s('15'),unit:null},
+      {description:s('Filter A20'),quantity:s('10'),unit:null},
+      {description:s('Thermostat X-200'),quantity:s('5'),unit:null},
+      {description:s('Filter'),quantity:s('20'),unit:null}
+    ],reply:{language:'de',draft:'Guten Tag, wir prüfen Verfügbarkeit, Preise und den möglichen Liefertermin.'}};
+  const result=verifyMailProposal(raw,german);
+  assert.equal(result.intent?.kind,'inquiry');
+  assert.equal(result.lines[0].quantity.evidence.start,text.indexOf('15x'));
+  assert.equal(result.lines[3].description.evidence.start,text.lastIndexOf('Filter'));
+  assert.equal(result.lines[3].quantity.evidence.start,text.indexOf('20x'));
+});
+test('repeated sender and company mentions do not invalidate otherwise exact mail evidence',()=>{
+  const text='Tallinna Kliimatehnika OÜ. Toomas Tamm, Procurement Manager, Tallinna Kliimatehnika OÜ. We need a non-binding price quote for 10x Filter A20 and 20x Filter. Best regards, Toomas Tamm';
+  const mail:Source[]=[{source:'email',page:0,text}];
+  const s=(quote:string,value=quote)=>({sourceIndex:0,quote,value});
+  const raw={intent:'inquiry',intentEvidence:s('non-binding price quote'),facts:{customer:[s('Tallinna Kliimatehnika OÜ')],sender:[s('Toomas Tamm')],location:[],po:[],date:[],address:[]},
+    lines:[{description:s('Filter A20'),quantity:s('10'),unit:null},{description:s('Filter'),quantity:s('20'),unit:null}],
+    reply:{language:'en',draft:'Hello Toomas, we are checking availability, applicable prices, and delivery timing.'}};
+  const result=verifyMailProposal(raw,mail);
+  assert.equal(result.facts.customer[0].evidence.start,0);
+  assert.equal(result.facts.sender[0].evidence.start,text.indexOf('Toomas Tamm'));
+  assert.equal(result.lines[1].description.evidence.start,text.lastIndexOf('Filter'));
 });
 test('soft purchase language is deterministically held as conditional with source evidence',()=>{
   const softSources:Source[]=[{source:'email',page:0,text:'We are Messerschmitt & sons from Little Rock, Ohio, USA. We are interested in placing an order of 50 type a10 filters. Best, Gavin Livingson.'}];
