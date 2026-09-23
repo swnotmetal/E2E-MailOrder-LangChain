@@ -2,7 +2,7 @@ import { Annotation, StateGraph, START, END, interrupt } from '@langchain/langgr
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { type ERP } from './erp.js';
 import { templateExtractor, verifyEvidence, type Extractor } from './input.js';
-import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type Decision, type InquiryCase,
+import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type Decision, type InquiryCase, type InquiryLine,
   DecisionSchema, InquiryDecisionSchema, validate, normalize, digest, fields } from './domain.js';
 
 const State = Annotation.Root({
@@ -24,24 +24,56 @@ function matchingItems(items:Item[],text:string) {
   });
 }
 
-function draftInquiryReply(intent:InquiryCase['intent'],senderName:string,itemCode:string,itemText:string,quantity:string,sourceText:string,modelDraft?:string) {
-  if(modelDraft?.trim())return modelDraft.trim();
-  const item=itemCode||itemText||'the item you mentioned';
-  const amount=quantity?` for a quantity of ${quantity}`:'';
-  if(/\p{Script=Han}/u.test(sourceText)) {
-    const subject=itemCode||itemText||'您提到的商品';
-    const count=quantity?`（数量 ${quantity}）`:'';
-    const opening=intent==='conditional'?`感谢您咨询 ${subject}${count}。我们已留意到您需要先确认相关条件再决定是否购买。`
-      :intent==='unclear'?`感谢您关于 ${subject}${count} 的来信。我们希望先确认已正确理解您的需求。`
-      :`感谢您咨询 ${subject}${count}。`;
-    return `您好${senderName?`，${senderName}`:''}：\n\n${opening}\n\n我们正在核对库存、适用价格和预计交期，确认后会尽快回复，方便您决定是否继续。\n\n此致\n销售团队`;
+function replyLanguage(sourceText:string,modelLanguage?:string) {
+  if(/\p{Script=Han}/u.test(sourceText)) return 'zh';
+  const text=` ${normalize(sourceText)} `;
+  const markers={
+    en:[' we ',' are ',' please ',' hello ',' thanks ',' best regards ',' interested ',' need '],
+    de:[' wir ',' bitte ',' vielen dank ',' mit freundlichen grüßen ',' lieferung ',' interessiert ',' benötigen '],
+    et:[' soovime ',' palun ',' tänud ',' lugupidamisega ',' oleme ',' vajame ',' kaupade ',' kättesaadavuse ']
+  } as const;
+  const ranked=Object.entries(markers).map(([language,words])=>({language,score:words.filter(word=>text.includes(word)).length})).sort((a,b)=>b.score-a.score);
+  if(ranked[0].score>=2 && ranked[0].score>ranked[1].score) return ranked[0].language;
+  return modelLanguage?.trim().toLowerCase()||'en';
+}
+
+function inventoryText(line:InquiryLine,language:string) {
+  const item=line.itemCode||line.itemText||'—';
+  const qty=line.quantity||'?';
+  if(language==='zh') {
+    if(line.status==='recorded-stock') return `${item}：询问数量 ${qty}；ERP 当前记录库存 ${line.inventory?.totalActualQty}（这不是预留或交付承诺）。`;
+    if(line.status==='out-of-stock') return `${item}：询问数量 ${qty}；ERP 当前记录库存为 0，暂不能确认供货。`;
+    if(line.status==='untracked') return `${item}：询问数量 ${qty}；ERP 不跟踪该商品库存数量，需要人工确认。`;
+    if(line.status==='lookup-failed') return `${item}：询问数量 ${qty}；库存查询失败，需要人工确认。`;
+    return `${item}：询问数量 ${qty}；无法唯一匹配 ERP 商品，请确认准确商品编码。`;
   }
-  const opening=intent==='conditional'
-    ? `Thanks for checking with us about ${item}${amount}. We understand that the delivery timing matters before you decide.`
-    : intent==='unclear'
-      ? `Thanks for your message about ${item}${amount}. We want to make sure we have understood your request correctly.`
-      : `Thanks for getting in touch about ${item}${amount}.`;
-  return `Hello${senderName?` ${senderName}`:''},\n\n${opening}\n\nOur team is confirming availability, the applicable price, and the expected delivery date. We’ll get back to you with those details so you can decide whether to proceed.\n\nBest regards,\nSales team`;
+  if(language==='de') {
+    if(line.status==='recorded-stock') return `${item}: angefragte Menge ${qty}; im ERP erfasster Bestand ${line.inventory?.totalActualQty} (keine Reservierungs- oder Lieferzusage).`;
+    if(line.status==='out-of-stock') return `${item}: angefragte Menge ${qty}; erfasster ERP-Bestand 0, daher können wir die Verfügbarkeit derzeit nicht bestätigen.`;
+    if(line.status==='untracked') return `${item}: angefragte Menge ${qty}; die Bestandsmenge wird im ERP nicht geführt und muss geprüft werden.`;
+    if(line.status==='lookup-failed') return `${item}: angefragte Menge ${qty}; die Bestandsabfrage ist fehlgeschlagen und muss geprüft werden.`;
+    return `${item}: angefragte Menge ${qty}; kein eindeutiger ERP-Artikel gefunden. Bitte bestätigen Sie die genaue Artikelnummer.`;
+  }
+  if(language==='et') {
+    if(line.status==='recorded-stock') return `${item}: küsitud kogus ${qty}; ERP-s registreeritud laoseis ${line.inventory?.totalActualQty} (see ei ole broneering ega tarnelubadus).`;
+    if(line.status==='out-of-stock') return `${item}: küsitud kogus ${qty}; ERP-s registreeritud laoseis on 0, seega ei saa saadavust praegu kinnitada.`;
+    if(line.status==='untracked') return `${item}: küsitud kogus ${qty}; ERP ei jälgi selle toote laokogust ja see vajab käsitsi kontrolli.`;
+    if(line.status==='lookup-failed') return `${item}: küsitud kogus ${qty}; laopäring ebaõnnestus ja vajab käsitsi kontrolli.`;
+    return `${item}: küsitud kogus ${qty}; ühest ERP toodet ei leitud. Palun kinnitage täpne tootekood.`;
+  }
+  if(line.status==='recorded-stock') return `${item}: requested quantity ${qty}; recorded ERP stock is ${line.inventory?.totalActualQty} (not a reservation or delivery commitment).`;
+  if(line.status==='out-of-stock') return `${item}: requested quantity ${qty}; recorded ERP stock is 0, so availability cannot currently be confirmed.`;
+  if(line.status==='untracked') return `${item}: requested quantity ${qty}; ERP does not track a stock quantity for this item, so manual confirmation is needed.`;
+  if(line.status==='lookup-failed') return `${item}: requested quantity ${qty}; the inventory lookup failed and needs manual confirmation.`;
+  return `${item}: requested quantity ${qty}; no unique ERP item was found. Please confirm the exact item code.`;
+}
+
+function draftInquiryReply(senderName:string,lines:InquiryLine[],language:string) {
+  const details=lines.map(line=>`- ${inventoryText(line,language)}`).join('\n');
+  if(language==='zh') return `您好${senderName?`，${senderName}`:''}：\n\n感谢您的询价。我们已检查当前目录和只读库存记录：\n\n${details}\n\n价格和您要求的交付日期仍需人工确认。确认后我们会发送正式报价；本邮件不构成库存预留或交付承诺。\n\n此致\n销售团队`;
+  if(language==='de') return `Guten Tag${senderName?` ${senderName}`:''},\n\nvielen Dank für Ihre Anfrage. Wir haben den aktuellen Katalog und die schreibgeschützten Bestandsdaten geprüft:\n\n${details}\n\nPreise und der gewünschte Liefertermin müssen noch bestätigt werden. Danach senden wir Ihnen ein verbindliches Angebot; diese Nachricht reserviert keine Ware und ist keine Lieferzusage.\n\nMit freundlichen Grüßen\nVertriebsteam`;
+  if(language==='et') return `Tere${senderName?` ${senderName}`:''},\n\ntäname päringu eest. Kontrollisime praegust kataloogi ja kirjutuskaitstud laoseisu:\n\n${details}\n\nHinnad ja soovitud tarnekuupäev vajavad veel kinnitamist. Seejärel saadame kinnitatud pakkumise; käesolev kiri ei broneeri kaupa ega anna tarnelubadust.\n\nLugupidamisega\nMüügimeeskond`;
+  return `Hello${senderName?` ${senderName}`:''},\n\nThank you for your inquiry. We checked the current catalog and read-only inventory records:\n\n${details}\n\nPrices and your requested delivery date still need human confirmation. We will send a confirmed quotation after those checks; this message does not reserve stock or promise delivery.\n\nBest regards,\nSales team`;
 }
 
 export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor) {
@@ -64,31 +96,37 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
     .addNode('prepareInquiry',async s=>{
       const [customers,items]=await Promise.all([erp.customers(),erp.items()]);
       const value=(f:typeof fields[number])=>s.extracted.facts[f][0]?.value??'';
-      const line=s.extracted.lines[0];
       const customerText=value('customer');
       const senderName=s.extracted.facts.sender[0]?.value??'';
       const customerMatches=customers.filter(c=>[c.name,c.customer_name].some(v=>normalize(v)===normalize(customerText)));
-      const itemText=line?.description.value??'';
-      const itemMatches=matchingItems(items,itemText);
-      const itemCode=itemMatches.length===1?itemMatches[0].name:'';
       const needs:string[]=[];
       if(customerMatches.length!==1) needs.push('确认客户身份或选择 ERP 客户；这不妨碍先回复一般询价');
-      if(!itemCode) needs.push('确认准确商品编码');
-      let inventory:InquiryCase['inventory']=null;
-      if(itemCode) try {
-        const stock=await erp.inventory(itemCode);inventory={stockTracked:stock.stockTracked,totalActualQty:stock.totalActualQty};
-        if(!stock.stockTracked || stock.totalActualQty===null) needs.push('库存数量未跟踪，需要人工确认');
-      } catch {needs.push('库存查询失败，需要人工确认');}
+      const emailLines=s.extracted.lines.filter(line=>line.description.evidence.source==='email');
+      const extractedLines=emailLines.length?emailLines:s.extracted.lines;
+      const lines=await Promise.all(extractedLines.map(async line=>{
+        const itemText=line.description.value;
+        const itemMatches=matchingItems(items,itemText);
+        const itemCode=itemMatches.length===1?itemMatches[0].name:'';
+        const base={itemText,itemCode,quantity:line.quantity.value};
+        if(!itemCode) return {...base,status:'unresolved',inventory:null} as InquiryLine;
+        try {
+          const stock=await erp.inventory(itemCode);
+          const inventory={stockTracked:stock.stockTracked,totalActualQty:stock.totalActualQty};
+          const status=!stock.stockTracked||stock.totalActualQty===null?'untracked':stock.totalActualQty===0?'out-of-stock':'recorded-stock';
+          return {...base,status,inventory} as InquiryLine;
+        } catch {return {...base,status:'lookup-failed',inventory:null} as InquiryLine;}
+      }));
+      if(lines.some(line=>line.status==='unresolved')) needs.push('确认未能唯一匹配的准确商品编码');
+      if(lines.some(line=>line.status==='untracked')) needs.push('库存数量未跟踪，需要人工确认');
+      if(lines.some(line=>line.status==='lookup-failed')) needs.push('库存查询失败，需要人工确认');
       needs.push('确认适用价格','确认客户要求的交期能否满足');
-      const quantity=line?.quantity.value??'';
       const condition=s.extracted.intent?.evidence.value??'';
       const intent=s.extracted.intent?.kind as InquiryCase['intent'];
       const sourceText=s.sources.find(source=>source.source==='email')?.text??s.sources[0]?.text??'';
-      const replyLanguage=s.extracted.reply?.language??(/\p{Script=Han}/u.test(sourceText)?'zh':'en');
-      const suggested=s.extracted.reply?.draft.replace(/\[(?:your name|name)\]/gi,replyLanguage.startsWith('zh')?'销售团队':'Sales team');
-      const responseDraft=draftInquiryReply(intent,senderName,itemCode,itemText,quantity,sourceText,suggested);
+      const language=replyLanguage(sourceText,s.extracted.reply?.language);
+      const responseDraft=draftInquiryReply(senderName,lines,language);
       const inquiry:InquiryCase={intent,customerText,senderName,
-        customer:customerMatches.length===1?customerMatches[0].name:'',itemText,itemCode,quantity,condition,inventory,needs,replyLanguage,responseDraft};
+        customer:customerMatches.length===1?customerMatches[0].name:'',lines,condition,needs,replyLanguage:language,responseDraft};
       return {inquiry,customers,items,issues:[],revision:digest([s.sources,inquiry]),status:'inquiry-review'};
     })
     .addNode('inquiryReview',s=>{

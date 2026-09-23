@@ -9,15 +9,19 @@ export type Evidence = { source: 'email' | 'pdf'; page: number; start: number; e
 export type Fact = { value: string; evidence: Evidence };
 export type Source = { source: 'email' | 'pdf'; page: number; text: string };
 export type Extraction = { facts: Record<FactField, Fact[]>; lines: { description: Fact; quantity: Fact; unit: Fact }[];
-  intent?:{kind:'purchase'|'inquiry'|'conditional'|'unclear';evidence:Fact}; reply?:{language:string;draft:string}; traceId?:string };
+  intent?:{kind:'purchase'|'inquiry'|'conditional'|'unclear';evidence:Fact}; reply?:{language:string}; traceId?:string };
 export type Customer = { name: string; customer_name: string };
 export type Item = { name: string; item_name: string; stock_uom: string; disabled?: number };
 export type Address = { name: string; text: string };
 export type Issue = { code: string; field: string; message: string };
+export type InquiryLine = {
+  itemText:string; itemCode:string; quantity:string;
+  status:'recorded-stock'|'out-of-stock'|'untracked'|'unresolved'|'lookup-failed';
+  inventory:{stockTracked:boolean;totalActualQty:number|null}|null;
+};
 export type InquiryCase = {
   intent:'inquiry'|'conditional'|'unclear'; customerText:string; senderName:string; customer:string;
-  itemText:string; itemCode:string; quantity:string; condition:string;
-  inventory:{stockTracked:boolean;totalActualQty:number|null}|null;
+  lines:InquiryLine[]; condition:string;
   needs:string[]; replyLanguage:string; responseDraft:string;
 };
 export const DraftSchema = z.object({

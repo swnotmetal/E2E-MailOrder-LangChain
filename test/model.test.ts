@@ -12,7 +12,7 @@ const facts={facts:{customer:[span('Acme Workshop')],sender:[span('Mia Example')
   lines:[{description:span('FILTER-A10'),quantity:span('5 FILTER-A10','5'),unit:span('(Nos)','Nos')}]};
 test('mail intent is grounded and missing line fields stay unresolved',()=>{
   const raw={...facts,intent:'conditional',intentEvidence:span('Please order'),lines:[{description:span('FILTER-A10'),quantity:null,unit:null}],
-    reply:{language:'en',draft:'Hello Mia, we are checking availability, price, and delivery timing.'}};
+    reply:{language:'en'}};
   const result=verifyMailProposal(raw,sources);
   assert.equal(result.intent?.kind,'conditional');assert.equal(result.facts.sender[0].value,'Mia Example');assert.equal(result.lines[0].quantity.value,'');assert.equal(result.lines[0].unit.value,'');
   assert.throws(()=>verifyMailProposal({...raw,intentEvidence:span('invented confirmation')},sources),/MODEL_QUOTE_NOT_FOUND/);
@@ -41,7 +41,7 @@ test('mail line fields use their closest grounded combination when individual qu
       {description:s('Filter A20'),quantity:s('10'),unit:null},
       {description:s('Thermostat X-200'),quantity:s('5'),unit:null},
       {description:s('Filter'),quantity:s('20'),unit:null}
-    ],reply:{language:'de',draft:'Guten Tag, wir prüfen Verfügbarkeit, Preise und den möglichen Liefertermin.'}};
+    ],reply:{language:'de'}};
   const result=verifyMailProposal(raw,german);
   assert.equal(result.intent?.kind,'inquiry');
   assert.equal(result.lines[0].quantity.evidence.start,text.indexOf('15x'));
@@ -54,7 +54,7 @@ test('repeated sender and company mentions do not invalidate otherwise exact mai
   const s=(quote:string,value=quote)=>({sourceIndex:0,quote,value});
   const raw={intent:'inquiry',intentEvidence:s('non-binding price quote'),facts:{customer:[s('Tallinna Kliimatehnika OÜ')],sender:[s('Toomas Tamm')],location:[],po:[],date:[],address:[]},
     lines:[{description:s('Filter A20'),quantity:s('10'),unit:null},{description:s('Filter'),quantity:s('20'),unit:null}],
-    reply:{language:'en',draft:'Hello Toomas, we are checking availability, applicable prices, and delivery timing.'}};
+    reply:{language:'en'}};
   const result=verifyMailProposal(raw,mail);
   assert.equal(result.facts.customer[0].evidence.start,0);
   assert.equal(result.facts.sender[0].evidence.start,text.indexOf('Toomas Tamm'));
@@ -65,11 +65,10 @@ test('soft purchase language is deterministically held as conditional with sourc
   const s=(quote:string,value=quote)=>({sourceIndex:0,quote,value});
   const raw={intent:'purchase',intentEvidence:s('placing an order'),facts:{customer:[s('Messerschmitt & sons')],sender:[s('Gavin Livingson')],
     location:[s('Little Rock, Ohio, USA')],po:[],date:[],address:[]},lines:[{description:s('type a10 filters'),quantity:s('50 type','50'),unit:null}],
-    reply:{language:'en',draft:'Hello Gavin, we are checking availability, price, and delivery timing.'}};
+    reply:{language:'en'}};
   const result=verifyMailProposal(raw,softSources);
   assert.equal(result.intent?.kind,'conditional');assert.equal(result.intent?.evidence.value,'interested in placing an order');
   assert.equal(result.facts.location[0].value,'Little Rock, Ohio, USA');assert.deepEqual(result.facts.address,[]);assert.equal(result.reply?.language,'en');
-  assert.throws(()=>verifyMailProposal({...raw,reply:{language:'en',draft:'Visit https://example.com'}},softSources),/Reply must not contain links/);
 });
 test('inventory tool is read-only and preserves unavailable stock as unknown',async()=>{
   let requested='';

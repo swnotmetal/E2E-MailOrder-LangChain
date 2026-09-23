@@ -127,11 +127,10 @@ test('inquiry and conditional intents use reply review without order validation 
       await graph.invoke({sources:await sources()},config());
       const s=await graph.getState(config());
       assert.equal(s.values.status,'inquiry-review');assert.deepEqual(s.values.issues,[]);
-      assert.equal(s.values.inquiry.itemCode,'FILTER-A10');assert.equal(s.values.inquiry.inventory.totalActualQty,12);
-      assert.match(s.values.inquiry.responseDraft,/Our team is confirming availability, the applicable price, and the expected delivery date/);
-      assert.match(s.values.inquiry.responseDraft,/so you can decide whether to proceed/);
+      assert.equal(s.values.inquiry.lines[0].itemCode,'FILTER-A10');assert.equal(s.values.inquiry.lines[0].inventory.totalActualQty,12);
+      assert.match(s.values.inquiry.responseDraft,/recorded ERP stock is 12/);
+      assert.match(s.values.inquiry.responseDraft,/Prices and your requested delivery date still need human confirmation/);
       assert.doesNotMatch(s.values.inquiry.responseDraft,/No order has been created/);
-      if(kind==='conditional') assert.match(s.values.inquiry.responseDraft,/delivery timing matters before you decide/);
       assert.equal((s.tasks[0].interrupts[0].value as any).kind,'inquiry');
       const decision:InquiryDecision={action:'approve-reply',revision:s.values.revision,actor:'test-operator',reason:'Checked fictional reply',responseDraft:s.values.inquiry.responseDraft};
       await graph.invoke(new Command({resume:decision}),config());
@@ -149,7 +148,7 @@ test('a unique model token maps conversational A10 text without weakening generi
       intent:{kind:'conditional' as const,evidence:fact('interested')},lines:[{description:fact('type a10 filters'),quantity:fact('50'),unit:empty}]}));
     await graph.invoke({sources:input},config('model-token'));
     const s=await graph.getState(config('model-token'));
-    assert.equal(s.values.inquiry.itemCode,'FILTER-A10');assert.equal(s.values.status,'inquiry-review');assert.equal(x.mock.posts,0);
+    assert.equal(s.values.inquiry.lines[0].itemCode,'FILTER-A10');assert.equal(s.values.status,'inquiry-review');assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });
 test('inquiry fallback reply follows a Chinese customer message',async()=>{
@@ -161,8 +160,33 @@ test('inquiry fallback reply follows a Chinese customer message',async()=>{
       intent:{kind:'inquiry' as const,evidence:fact('想了解')},lines:[{description:fact('FILTER-A10'),quantity:fact('5'),unit:empty}]}));
     await graph.invoke({sources:[{source:'email',page:0,text}]},config('chinese-reply'));
     const s=await graph.getState(config('chinese-reply'));
-    assert.match(s.values.inquiry.responseDraft,/您好/);assert.match(s.values.inquiry.responseDraft,/核对库存、适用价格和预计交期/);
+    assert.match(s.values.inquiry.responseDraft,/您好/);assert.match(s.values.inquiry.responseDraft,/ERP 当前记录库存 12/);
+    assert.match(s.values.inquiry.responseDraft,/价格和您要求的交付日期仍需人工确认/);
     assert.doesNotMatch(s.values.inquiry.responseDraft,/Our team/);assert.equal(x.mock.posts,0);
+  }finally{await x.close();}
+});
+test('multi-product English inquiry reports every read-only ERP result and ignores company locale',async()=>{
+  const x=await setup();try{
+    const text=`TALLINNA KLIIMATEHNIKA OÜ Narva mnt 7, 10117 Tallinn, Estonia\nToomas Tamm, Procurement Manager\nHello,\nWe are looking for a non-binding price quote and availability information. We are interested in these products:\n* 10x Filter A20\n* 12x Radiaatori ventiil H-4\n* 15x Smart Thermostat V1\n* 5x Thermostat X-200\n* 8x Õhufilter Carbon-X\n* 20x Filter\nAre there any expected supply shortages? Please let us know if you can fully deliver the goods. We need the items by October 15, 2026, at the latest.\nThanks in advance for a quick response!\nBest regards,\nToomas Tamm`;
+    const fact=(quote:string,value=quote)=>{const start=text.indexOf(quote);const within=quote.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start:start+within,end:start+within+value.length,quote:value}};};
+    const line=(description:string,quantityQuote:string,quantity:string)=>({description:fact(description),quantity:fact(quantityQuote,quantity),unit:fact(description,'')});
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[fact('TALLINNA KLIIMATEHNIKA OÜ')],sender:[fact('Toomas Tamm')],location:[fact('Tallinn, Estonia')],po:[],date:[fact('October 15, 2026')],address:[]},
+      intent:{kind:'inquiry' as const,evidence:fact('non-binding price quote')},reply:{language:'et'},lines:[
+        line('Filter A20','10x','10'),line('Radiaatori ventiil H-4','12x','12'),line('Smart Thermostat V1','15x','15'),
+        line('Thermostat X-200','5x','5'),line('Õhufilter Carbon-X','8x','8'),line('Filter','20x','20')]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('multi-inquiry'));
+    const s=await graph.getState(config('multi-inquiry'));const inquiry=s.values.inquiry;
+    assert.equal(inquiry.replyLanguage,'en');assert.equal(inquiry.lines.length,6);
+    assert.deepEqual(inquiry.lines.map((line:any)=>[line.itemCode,line.status,line.inventory?.totalActualQty??null]),[
+      ['FILTER-A20','out-of-stock',0],['','unresolved',null],['THERM-S1','recorded-stock',40],
+      ['','unresolved',null],['','unresolved',null],['','unresolved',null]
+    ]);
+    assert.match(inquiry.responseDraft,/Hello Toomas Tamm/);assert.doesNotMatch(inquiry.responseDraft,/Tere/);
+    assert.match(inquiry.responseDraft,/FILTER-A20: requested quantity 10; recorded ERP stock is 0/);
+    assert.match(inquiry.responseDraft,/THERM-S1: requested quantity 15; recorded ERP stock is 40/);
+    assert.match(inquiry.responseDraft,/Thermostat X-200: requested quantity 5; no unique ERP item was found/);
+    assert.match(inquiry.responseDraft,/Prices and your requested delivery date still need human confirmation/);
+    assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });
 test('same PO with changed approved content is never silently reused',async()=>{
