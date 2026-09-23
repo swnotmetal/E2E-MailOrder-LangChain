@@ -1,4 +1,4 @@
-> 2026-09-22 当前约束：所有后续模型调用严格只用 Gemini 2.5 Flash-Lite（`gemini-2.5-flash-lite`），使用 GOOGLE_API_KEY / ORDER_EXTRACTOR=gemini。下文旧供应商记录仅为历史，不构成继续调用的授权。保留两次 / $0.05 预算账本；已发生一次旧供应商 401 请求，真实 Gemini 成功验证尚未完成。
+> 2026-09-23 当前约束：所有后续模型调用严格只用 Gemini 2.5 Flash-Lite（`gemini-2.5-flash-lite`），使用 GOOGLE_API_KEY / ORDER_EXTRACTOR=gemini。下文旧供应商记录仅为历史，不构成继续调用的授权。用户已撤销两次 / $0.05 本地限制，保留历史账本；额度或限流错误停止，不自动重试或切换。自然语言邮件抽取已有真实 Gemini 成功证据；成功 LangSmith 工具轨迹仍待验证。
 
 # 学习项目阶段记录（2026-09-21）
 

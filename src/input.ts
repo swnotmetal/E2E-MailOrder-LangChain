@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { type Source, type Extraction, type Fact, fields } from './domain.js';
+import { type Source, type Extraction, type Fact, factFields } from './domain.js';
 
 export async function readSources(email: string, pdf: string): Promise<Source[]> {
   const mail = await readFile(email);
@@ -26,13 +26,13 @@ export async function readSources(email: string, pdf: string): Promise<Source[]>
 
 // Deliberately bounded template adapter; unknown prose is not interpreted as a confirmed order.
 export async function templateExtractor(sources: Source[]): Promise<Extraction> {
-  const result: Extraction = {facts:{customer:[],po:[],date:[],address:[]},lines:[]};
-  const labels = {customer:'Customer',po:'PO',date:'Delivery',address:'Address'};
+  const result: Extraction = {facts:{customer:[],sender:[],location:[],po:[],date:[],address:[]},lines:[]};
+  const labels = {customer:'Customer',sender:'Sender',location:'Location',po:'PO',date:'Delivery',address:'Address'};
   for(const s of sources) {
     function fact(value: string, start: number): Fact {
       return {value:value.trim(), evidence:{source:s.source,page:s.page,start,end:start+value.length,quote:value}};
     }
-    for(const f of fields) {
+    for(const f of factFields) {
       const regex = new RegExp(`^${labels[f]}:[ \\t]*(.+)$`,'gm');
       for(const m of s.text.matchAll(regex)) result.facts[f].push(fact(m[1],m.index!+m[0].length-m[1].length));
     }

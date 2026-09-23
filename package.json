@@ -7,6 +7,8 @@
     "node": ">=22.18"
   },
   "scripts": {
+    "learn": "tsx scripts/learn.ts",
+    "mock:erp": "tsx scripts/mock-erp-server.ts",
     "check": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
     "cli": "tsx src/cli.ts",

@@ -1,0 +1,7 @@
+Supplier_ID,Supplier_Name,Contact_Name,Contact_Email,Lead_Time_Days,Supplier_Rating
+SUP-01,Fictional Supplier 1,Supplier Contact 1,sup1@example.com,5,3.0
+SUP-02,Fictional Supplier 2,Supplier Contact 2,sup2@example.com,25,1.4
+SUP-03,Fictional Supplier 3,Supplier Contact 3,sup3@example.com,16,4.6
+SUP-04,Fictional Supplier 4,Supplier Contact 4,sup4@example.com,28,3.1
+SUP-05,Fictional Supplier 5,Supplier Contact 5,sup5@example.com,5,3.2
+SUP-06,Fictional Supplier 6,Supplier Contact 6,sup6@example.com,23,2.6

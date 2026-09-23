@@ -1,5 +1,5 @@
 import { type Customer, type Item, type Address, type Draft, digest, orderKey, normalize } from './domain.js';
-export type ERP = Pick<FrappeERP, 'customers'|'items'|'addresses'|'duplicates'|'createDraft'>;
+export type ERP = Pick<FrappeERP, 'customers'|'items'|'inventory'|'addresses'|'duplicates'|'createDraft'>;
 export type Order = {name:string; custom_integration_key?:string; custom_review_digest?:string; docstatus:number; po_no?:string};
 export type Inventory = {itemCode:string; itemName:string; stockTracked:boolean; totalActualQty:number|null; warehouses:{warehouse:string;actualQty:number;projectedQty:number;reservedQty:number}[]};
 

@@ -6,6 +6,11 @@ dist/
 data/
 infra/frappe_docker/
 *.log
+*.tmp
+*.bak
+coverage/
+.DS_Store
+Thumbs.db
 .agents/*
 !.agents/skills/
 .agents/skills/*

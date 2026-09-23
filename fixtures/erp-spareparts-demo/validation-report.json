@@ -1,0 +1,27 @@
+{
+    "records_count": {
+        "items": 30,
+        "inventory_bins": 31,
+        "customers": 12,
+        "addresses": 12,
+        "suppliers": 6,
+        "purchase_order_lines": 20,
+        "sales_order_lines": 40
+    },
+    "duplicate_pk": 0,
+    "invalid_fk": 0,
+    "empty_mandatory": 0,
+    "negative_inventory": 0,
+    "invalid_qty": 0,
+    "sales_total_errors": 0,
+    "po_expected_date_errors": 0,
+    "so_delivery_date_errors": 0,
+    "filter_a10_total_stock": 12,
+    "filter_a20_total_stock": 0,
+    "zero_stock_item_count": 1,
+    "low_stock_item_count": 4,
+    "non_stock_item_count": 1,
+    "x200_match_count": 0,
+    "multi_line_po_count": 6,
+    "multi_line_so_count": 11
+}

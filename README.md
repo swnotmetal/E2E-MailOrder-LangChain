@@ -1,68 +1,113 @@
-# B2B 订单邮件与采购单审核助手
+# B2B Email Order Review Lab
 
-学习 / 工程作品集；所有示例资料虚构。TypeScript + LangGraph + SQLite + ERPNext REST API，无向量库、多 agent；默认零模型调用。所有模型测试严格只用 Gemini 2.5 Flash-Lite（gemini-2.5-flash-lite）。
+An open-source learning and engineering portfolio project for reviewing B2B order emails with TypeScript, LangChain, LangGraph, LangSmith, SQLite, and ERPNext-compatible APIs.
 
-**当前状态：真实本地 ERPNext 的人工批准、Draft 写入与重复订单检查已有阶段记录；只读库存查询已实测。Gemini 模型调用与成功 LangSmith 工具轨迹仍待验证。详见 docs/learning-handoff-2026-09-21.md 和 docs/model.md。**
+All examples and fixture records are fictional. The project deliberately has no vector database or multi-agent workflow. Every live model path uses only `gemini-2.5-flash-lite` through the shared entry point in `src/model.ts`; deterministic tests make no model calls.
 
-## 快速运行
+## What this demonstrates
 
-Node >=22.18。当前电脑 PATH 内 npm 损坏，可用 `& 'C:/Program Files/nodejs/npm.cmd'` 替代下面的 npm。只影响命令入口，未修改全局安装。
+- natural-language email extraction with source evidence;
+- order-versus-inquiry routing and same-language draft replies;
+- read-only customer, catalog, address, inventory, and pricing tools;
+- LangGraph interrupts, persisted checkpoints, revision-bound approval, and recovery;
+- deterministic validation before any ERP side effect;
+- ERP Draft creation behind a human approval boundary;
+- idempotency and reconciliation after uncertain writes;
+- explicit separation of mock tests, live integration evidence, and unverified claims.
+
+Current evidence: a local ERPNext instance has previously completed human-approved Draft creation and duplicate-order checks; Gemini natural-language extraction and read-only inventory lookup have also been exercised. A successful LangSmith tool trace is still pending. See [the learning handoff](docs/learning-handoff-2026-09-21.md) and [model notes](docs/model.md) for the precise evidence status.
+
+## Quick start
+
+Requirements: Node.js 22.18 or newer.
 
 ```powershell
 npm ci
 npm run check
 npm test
-npm run demo
+npm run learn
 ```
 
-`demo` 是明确标识的 HTTP MOCK：读取真实邮件/PDF → LangGraph 提取和匹配 → SQLite 保存审核中断 → 新 CLI 进程导出审核 JSON → 开发脚本批准 → 再次批准验证只有一张模拟订单。结果在 data/mock-demo-*/result.json。正式 CLI 不会自动批准。
+Open <http://127.0.0.1:3210>. The local learning UI is currently Chinese-first and uses fictional data. It lets you submit realistic email prose, inspect routing and tool activity, edit a pending draft, and resume a human-review interrupt. See the [Chinese learning guide](docs/learning-guide.md).
 
-## 真正 ERPNext
+To make the ERP boundary visible as a separate process, start the fixture-backed local HTTP service in one terminal:
 
-先解决 WSL2 的 HCS_E_HYPERV_NOT_INSTALLED，启用虚拟化 / Virtual Machine Platform 并重启。详见 infra/README.md。项目不会自动改变系统功能或重启电脑。
+```powershell
+npm run mock:erp
+```
+
+Then start the learning app in another terminal:
+
+```powershell
+$env:LEARN_ERP_BASE_URL='http://127.0.0.1:3211'
+npm run learn
+```
+
+Both processes use fictional fixture data. Stopping the mock ERP lets you observe a network failure without granting the model any write access.
+
+## Other runnable paths
+
+```powershell
+npm run demo
+npm run cli -- import fixtures/01-clean.eml fixtures/01-clean.pdf
+```
+
+`npm run demo` is explicitly an HTTP mock demonstration: it reads a fictional email and PDF, persists a LangGraph review interrupt, exports review JSON, performs a scripted development approval, and verifies that only one mock order exists. It is not evidence of a real ERP write.
+
+The CLI is the stricter review path. Typical commands are:
+
+```powershell
+npm run cli -- show <id>
+npm run cli -- review <id> data/review.json
+# inspect evidence and edit the draft; set action, reason, and the exact reviewed revision
+npm run cli -- decide <id> data/review.json
+npm run cli -- retry <id>
+```
+
+Raw inputs, audit state, and checkpoints live under ignored `data/`. Deleting that directory removes local recovery history. The ERP-side unique key remains the final duplicate-write safeguard.
+
+## Real ERPNext adapter
+
+The isolated local ERPNext setup is documented in [infra/README.md](infra/README.md). When it is running:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File infra/start-wsl.ps1
 $env:ERP_ENV_FILE='.env.erp'
 npm run cli -- import fixtures/01-clean.eml fixtures/01-clean.pdf
-# 从上一步输出复制 id
-npm run cli -- show <id>
-npm run cli -- review <id> data/review.json
-# 查看 sources/extracted/issues，编辑 review.json 中 draft；明确设 action=approve 并填写 reason
-npm run cli -- decide <id> data/review.json
-npm run cli -- show <id>
 ```
 
-action 也可为 reject 或 request-info。request-info 保持中断等待下一次审核。ERP 网络失败后修复连接，再执行 `npm run cli -- retry <id>`。再次启动同样 data 目录即可恢复，不需要长期运行服务。原始邮件/PDF、提取文本、审核历史和 checkpoints 均保存在 data/（不提交）。删除 data 会丢失本地审计/恢复状态，ERP 唯一键仍用于防重复。
+The workflow creates only `docstatus=0` Sales Order drafts after approval. It never gives the model ERP write credentials. Inventory tools are read-only, linked shipping addresses must already exist, and a timeout after POST is reconciled by the ERP integration key before any retry.
 
-审核是本机 CLI + 可编辑 JSON，尚无网页界面、多用户认证或邮件 MIME/OCR。默认模板解析器接受 Customer/PO/Delivery/Address 和 Item: 型号 | 数量 | 单位。可选 Gemini 2.5 Flash-Lite 适配器在 src/model.ts，设置 GOOGLE_API_KEY 与 ORDER_EXTRACTOR=gemini；库存入口 inventory 同样固定此模型。LangSmith 需 ORDER_TRACE=true，仅使用虚构资料。最多两次请求、总预算 $0.05，沿用原账本；真实 Gemini 验证尚未完成，见 docs/model.md。
+## Architecture boundaries
 
-## 关键设计
+- `src/input.ts` parses email/PDF text and retains exact source evidence.
+- `src/model.ts` is the single fixed Gemini 2.5 Flash-Lite entry point.
+- `src/domain.ts` performs deterministic required-field, date, quantity, and identity validation.
+- `src/workflow.ts` owns routing, tool calls, interrupts, revisions, and re-review.
+- `src/erp.ts` implements the ERPNext REST boundary and reconciliation behavior.
+- `src/mock-erp.ts` loads the committed fictional CSV dataset for local learning and tests.
+- `src/cli.ts` provides review commands and a cross-process operator lock.
 
-- `src/input.ts`：PDF 文本与邮件解析，精确引用原文；Extractor 可替换。
-- `src/domain.ts`：必填、日期、正整数数量和稳定订单身份。
-- `src/workflow.ts`：LangGraph 分支、中断与重审；人工修订后重新校验。
-- `src/erp.ts`：官方 Frappe resource API；ERP unique integration key + 超时查回防重复，不盲目重发 POST。
-- `src/cli.ts`：本地审核命令与跨进程锁。SQLite OS 锁在进程退出后释放，checkpoint 使用另一数据库独立落盘。
+The assistant does not calculate tax or authoritative totals; ERP pricing remains authoritative. Unknown or ambiguous product references stay unresolved for a human. A company location extracted from prose is not treated as an approved ERP shipping address.
 
-只支持 ERP stock_uom 整数数量，不在助手中计算税价；ERP 负责 EUR 单价和金额。未知型号保持空 item，候选目录给人工选择；来源冲突须说明解决原因。现在地址必须选 ERP 已关联地址，不自动新建地址。
+For the intended placement between enterprise email and ERP systems, failure boundaries, and a staged implementation path, read [Enterprise integration path](docs/enterprise-integration.md).
 
-10 个开发样例与业务状态见 docs/design.md。用户核对金标准和盲测方法见 docs/evaluation.md；开发回归不等于提取准确率。
+## Model and tracing policy
 
-## Skills / Miko
+Set `GOOGLE_API_KEY` and `ORDER_EXTRACTOR=gemini` to enable live extraction. Set `ORDER_TRACE=true` only when you intend to send fictional inputs to LangSmith. Every attempted request, including failures, is written to the local ignored ledger. The application stops on quota, rate-limit, or other API errors; it does not retry automatically or switch providers.
 
-使用 Ponytail 的最小实现原则和项目内 `.agents/skills/order-review/SKILL.md`。用户另行导入的技能库保留在本地、按任务选择读取；当前只提交 Miko 必需的 order-review。superpowers 计划后续接入，尚未安装。
+## Repository hygiene and project scope
 
-Miko 当前会话已报告 active / 绿色证据检查点。当前 miko.json 仅对 workflow.ts、erp.ts、domain.ts 的指定编辑动作要求读取 order-review，不代表监督全部 skills 或证明业务正确。新环境仍需验证 Hook 是否实际触达。
+- `.env`, `.env.erp`, `data/`, local Miko state, dependency folders, ERP containers, logs, coverage, and temporary/backup files are ignored.
+- Only the repository-specific `order-review` Skill is committed; the larger locally imported Skill library stays ignored.
+- This is an engineering learning project, not a claim of production readiness, commercial ROI, or labor savings.
+- Full MIME/OCR ingestion, authentication/RBAC, a production queue, an email provider connector, and a verified successful LangSmith tool trace remain future work.
 
-## 官方参考
+Development scenarios are described in [docs/design.md](docs/design.md). Human-owned gold data and evaluation limits are described in [docs/evaluation.md](docs/evaluation.md). Historical verification notes are in [docs/verification.md](docs/verification.md).
 
-- https://docs.langchain.com/oss/javascript/langgraph/interrupts
-- https://docs.frappe.io/framework/user/en/guides/integration/rest_api
-- https://github.com/frappe/frappe_docker
-- https://github.com/swnotmetal/Project-Koma/tree/main/packages/koma-miko
+## References
 
-接下来从 [学习入口](docs/learning-guide.md) 上手 LangGraph、LangChain 和 LangSmith，再考虑简易本地 UI。仍缺真实 Gemini / LangSmith 联调与用户确认 gold 后的独立评估；未宣称节约工时或市场需求。
-
-
-
+- [LangGraph interrupts](https://docs.langchain.com/oss/javascript/langgraph/interrupts)
+- [Frappe REST API](https://docs.frappe.io/framework/user/en/guides/integration/rest_api)
+- [Frappe Docker](https://github.com/frappe/frappe_docker)
+- [Koma Miko](https://github.com/swnotmetal/Project-Koma/tree/main/packages/koma-miko)

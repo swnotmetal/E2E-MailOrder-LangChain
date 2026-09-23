@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>模拟收件箱 · 订单工作流</title>
+<style>
+:root{font:16px/1.6 system-ui;color:#dce6ef;background:#101923}body{max-width:1200px;margin:auto;padding:32px}h1{font-size:32px;margin:4px 0}h2{font-size:21px}small,.muted{color:#9cb2c6}.badge{color:#87e0ba}section{background:#1b2937;border:1px solid #35495b;border-radius:14px;padding:24px;margin:20px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}button,select,input,textarea{font:inherit;border-radius:6px;border:1px solid #577184;padding:9px;background:#101923;color:#e6edf4}button{cursor:pointer;background:#286e65;margin:4px}button:disabled{opacity:.45;cursor:wait}textarea{box-sizing:border-box;width:100%;font:14px/1.5 monospace;min-height:220px}input{width:85%}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#111c27;padding:14px;max-height:400px;overflow:auto;font-size:13px}#status{position:sticky;top:0;background:#101923;padding:10px;border-bottom:1px solid #547166}a{color:#80d9d0}label{display:block;margin:10px 0}.path{font-family:monospace;color:#a8dfd5}.alert{color:#ffb4b4;background:#3b171b;border:2px solid #e45d68;border-radius:8px;padding:12px 15px;font-weight:700}.alert code{color:#fff;background:#641f27;padding:1px 4px}.ok{color:#b9efd7;background:#15352c;border-color:#3b9b75}@media(max-width:760px){.grid{grid-template-columns:1fr}body{padding:14px}}
+.notice{color:#ffe2a0;background:#3b3020;border-color:#cba456}#editFeedback:empty{display:none}
+</style>
+<header><span class="badge">MOCK MAIL / 虚构练习环境</span><h1>模拟收件箱</h1><p>系统先分流邮件：询价形成待回复工单；明确订单才进入严格校验并生成模拟销售订单草稿。当前不会真正发信、报价、付款或收款。</p><label>理解方式<select id="mailMode"><option value="gemini">Gemini 2.5 Flash-Lite · 真实理解自然语言</option><option value="template">模板练习 · 不调用模型</option></select></label><p>Gemini 模式将虚构正文及附件文本发送给 Google；配置 ORDER_TRACE=true 时也发送到 LangSmith。API 错误会停止，不自动重试或降级。</p><button id="naturalExample">填入自然语言询问</button><p id="intent" class="alert notice">先发送邮件。询价不等于下单，条件购买进入回复审核。</p></header>
+<section><h2>写一封模拟邮件</h2><p>仅限虚构内容。附件栏模拟 PDF 提取后的文本，不上传真实文件。Gemini 模式可以直接写正常邮件；只有模板模式需要固定字段标签。</p><label>练习样例<select id="scenario"><option value="01-clean">正常订单</option><option value="02-ambiguous">型号不明确</option><option value="03-quantity-conflict">数量冲突</option></select></label><button id="loadMail">填入样例</button><label>主题<input id="subject" value="虚构采购订单"></label><div class="grid"><label>邮件正文<textarea id="mailBody" placeholder="先点击填入样例，然后可以修改正文"></textarea></label><label>模拟附件文本<textarea id="attachment"></textarea></label></div><button id="sendMail">发送到模拟收件箱</button><p>发送会保留已有订单。再次发送相同 PO 可练习重复订单处理；需要从头开始时，使用下方“清空收件箱与模拟订单”。</p></section>
+<section><h2>收件箱</h2><button id="refreshInbox">刷新收件箱</button><div id="inbox" aria-live="polite">点击刷新收件箱恢复本次服务中的邮件。</div></section>
+<div id="status" role="status" aria-live="polite">选择样例，填入正文，再发送第一封模拟邮件。</div>
+<details><summary>独立练习：LangChain 库存工具与两种失败</summary><section><h2>LangChain：工具究竟是什么？</h2><p>工具 = 名称 + 描述 + 参数 schema + 执行函数。这里手动扮演模型，提交它本来会生成的参数。<span class="path">src/model.ts → inventoryTool()</span></p>
+<div class="grid"><div><label for="tool">工具参数（JSON）</label><textarea id="tool" style="min-height:100px">{"itemCode":"FILTER-A10"}</textarea><button id="invoke">调用 get_inventory</button><p class="muted">试试把 itemCode 改为数字或空字符串：Zod 会拒绝。改为 UNKNOWN：执行函数会报错。两种失败发生在哪一层？</p></div><pre id="toolResult">这里展示 schema、输入和工具输出。null 表示库存未知，不能解释为 0。</pre></div></section>
+</details><section><h2>当前邮件 · 审核与执行过程</h2><p id="progress" class="path">发送邮件 → 提取 → 匹配 → 等待审核 → 模拟写入</p><p>打开收件箱中的邮件即可处理；下方原文保留发送时的内容。</p>
+<div hidden><select id="fixture"><option value="01-clean">正常</option><option value="02-ambiguous">型号不明</option><option value="03-quantity-conflict">数量冲突</option></select><button id="start">旧练习入口</button></div><button id="reload" disabled>刷新当前邮件状态</button><button id="reset">清空收件箱与模拟订单</button>
+<p id="lesson" class="alert notice">请选择样例或发送自然语言邮件；这里会显示当前邮件的教学状态。</p>
+<p id="summary">尚未打开邮件。刷新收件箱可重新打开已有邮件；只有清空或服务重启才会删除本轮练习数据。</p>
+<div class="grid"><div><h3>原文与处理依据</h3><p id="identityFacts" class="notice">尚未识别公司、联系人或送货地址。</p><div id="blocker" class="alert" hidden></div><pre id="sources">等待导入</pre><pre id="issues">等待匹配</pre></div><div><h3>人工处理</h3><div id="inquiryPanel" hidden><p id="inquiryFacts"></p><p><strong>仍需人工处理</strong></p><ul id="inquiryNeeds"></ul><label for="reply">建议回复草稿（可编辑，批准也不会真正发送）</label><textarea id="reply"></textarea></div><div id="orderPanel"><div id="reviewForm"></div><details><summary>高级：查看或编辑订单草稿 JSON</summary><textarea id="draft" spellcheck="false"></textarea></details></div><div id="editFeedback" role="status" aria-live="polite"></div><label for="reason">处理说明</label><input id="reason" placeholder="记录核对依据或下一步"><div><button data-action="approve" disabled>批准</button><button data-action="request-info" disabled>要求补充</button><button data-action="reject" disabled>关闭</button></div><p id="reviewHint" class="muted">系统不会代表员工发送邮件或创建正式订单。</p></div></div>
+<h3>本次节点更新（graph.stream 的实际返回）</h3><pre id="events">等待执行</pre><details><summary>展开完整 State / interrupt / audit</summary><pre id="state"></pre></details></section>
+<section><h2>03 / LangSmith：把执行过程留下来</h2><p>节点日志来自本地执行；自然语言理解在启用追踪后单独记录 LangSmith trace，成功时显示 trace ID。项目的模型路径用 RunTree 记录父流程、模型选择工具、工具结果及回答。<span class="path">src/model.ts → geminiInventoryAnswer()</span></p><ol><li>找到模型输入：它收到什么问题、能用哪些工具？</li><li>找到工具参数和输出：它是否真调用了 get_inventory？</li><li>核对延迟、usage、错误：请求失败不能算验证成功。</li></ol><p>真实模式仅用 <strong>Gemini 2.5 Flash-Lite</strong>。用户已撤销两次 / $0.05 本地上限，历史记录保留；额度或限流错误会停止调用，不自动切换模型。免费额度由 Google 项目控制。页面 Gemini 模式会发出真实 API 请求。</p><p><a href="https://smith.langchain.com/" target="_blank" rel="noreferrer">打开 LangSmith</a> · 在项目 docs/learning-guide.md 查看后续真实验证步骤。</p></section>
+<section><h2>复习检查</h2><p>① schema 拒绝输入与工具执行报错有何区别？ ② thread_id 与 revision 各解决什么问题？ ③ interrupt 后进程返回为何不等于流程结束？ ④ 为什么模型提出调用，实际执行却由代码负责？</p><details><summary>对照答案</summary><p>schema 在执行前检查参数；函数报错来自业务或数据源。thread_id 定位检查点，revision 防止批准旧草稿。interrupt 保存待恢复任务，由 Command(resume) 继续。模型只生成结构化意图，代码负责验证参数、权限及执行工具。</p></details></section>
+<script>
+const $=id=>document.getElementById(id);let current;
+const pretty=x=>JSON.stringify(x,null,2);
+const lessons={
+  '01-clean':['ok','正常订单：邮件和 PDF 都明确写了商品型号 FILTER-A10，可唯一匹配目录。'],
+  '02-ambiguous':['','问题不在 DEMO-002：它只是采购订单号（PO），而且存在。真正的问题是商品只写了泛称 “Filter”，目录却同时有 FILTER-A10 和 FILTER-A20，系统无法唯一选择。请向客户确认具体型号；没有新证据就选择“要求补充”。'],
+  '03-quantity-conflict':['','问题是数量冲突：邮件写 5，PDF 写 8。系统不能自行决定谁正确，需要人工核对并在审核理由中说明采用哪一个数量。']
+};
+function explainFixture(){const [kind,text]=lessons[$('fixture').value];$('lesson').className='alert '+kind;$('lesson').textContent=text;}
+async function api(path,input){const response=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:pretty(input)});const result=await response.json();if(!response.ok)throw Error(result.error);return result;}
+function message(id,text,kind='notice'){const el=$(id);el.hidden=!text;el.className='alert '+kind;el.textContent=text;}
+function outcome(){
+  if(!current)return;
+  const s=current, codes=(s.values.issues??[]).map(x=>x.code);
+  if(s.values.status==='response-approved'){
+    const text='✓ 回复草稿已由人工批准。本练习不会真正发送邮件，也没有创建订单。';
+    message('lesson',text,'ok');message('blocker','');message('editFeedback',text,'ok');$('status').textContent=text;return;
+  }
+  if(s.values.status==='closed'){message('lesson','询价工单已关闭；没有发送邮件或创建订单。','ok');message('blocker','');return;}
+  if(s.values.status==='created'){
+    const text='✓ 批准成功：已创建模拟订单 '+s.values.order+'。型号修改已通过校验，流程到达 END。';
+    message('lesson',text,'ok');message('blocker','');message('editFeedback',text,'ok');$('status').textContent=text;return;
+  }
+  if(s.values.status==='rejected'){message('lesson','已拒绝：流程结束，没有执行本次订单写入。','ok');message('blocker','');message('editFeedback','已拒绝本次订单。','ok');return;}
+  const feedback=s.pending.map(p=>p.feedback).filter(Boolean).join(' ');
+  const explanations={UNRESOLVED_ITEM:'商品型号尚未确认：请确认具体型号后填写 item。',ITEM_OR_UNIT:'商品代码或单位未通过目录校验。',LINE_CONFLICT:'邮件与 PDF 数量/商品不一致：核对后修改草稿并填写理由。',DUPLICATE_PO:'此 PO 已存在：请检查之前的练习，不要重复创建不同内容的订单。'};
+  Object.assign(explanations,{PURCHASE_NOT_CONFIRMED:'购买尚未确认：先由人工确认条件或回复客户。',MISSING:'订单字段缺失：请补充核对。',INVALID_DATE:'交付日期需人工确认，填写 YYYY-MM-DD。',UNKNOWN_CUSTOMER:'客户未匹配：请核对客户编码。',ADDRESS_MISMATCH:'收货地址未匹配：请选择该客户的地址。',INVALID_QUANTITY:'数量需人工确认并填写正整数。',MISSING_UNIT:'请确认计量单位。',MISSING_LINES:'尚无确定商品：确认后补充商品行。'});
+  const problem=[...new Set(codes)].map(c=>explanations[c]??c).join(' ');
+  if(s.values.inquiry){
+    const text='这是询价/条件购买工单。库存只读查询已经运行；价格、交期和客户身份仍由人工确认。';
+    message('lesson',text,'notice');message('blocker','');message('editFeedback','检查并修改回复草稿，然后批准回复或要求补充。','notice');$('status').textContent='已暂停在询价回复审核。';return;
+  }
+  if(s.values.extracted?.intent)message('lesson',problem||'已识别明确购买意图，请核对原文和草稿后决定。',problem?'':'notice');
+  let text=feedback.includes('PURCHASE_CONFIRMATION_REQUIRED')?'尚未确认购买：这是询问、条件购买或意图不明邮件。请先获得客户确认，再勾选确认并记录依据。':feedback.includes('RESOLUTION_REASON_REQUIRED')?'尚未批准：缺少审核理由。你编辑的草稿已保留，请填写依据后再次批准。':feedback.includes('STALE_APPROVAL')?'尚未批准：审核版本已变化，请重新核对当前草稿。':feedback||problem;
+  if(s.values.status==='needs-info')text='已记录“要求补充”，流程继续等待。获得型号确认后，编辑草稿、填写依据并重新批准。';
+  message('blocker',text,text && s.values.status!=='needs-info'?'':'notice');
+  message('editFeedback',text||'待你确认：检查草稿后点击批准，才会进行模拟写入。',text?'':'notice');
+  $('status').textContent=text||'已暂停在人工审核，等待你的决定。';
+}
+function edited(){
+  if(!current?.pending.length)return;
+  if(current.values.inquiry){message('editFeedback','回复或处理说明已修改，尚未批准、尚未发送。','notice');return;}
+  try{
+    const draft=JSON.parse($('draft').value);
+    const changed=pretty(draft)!==pretty(current.values.draft);
+    const item=draft.lines?.[0]?.item;
+    const known=current.values.items?.some(i=>i.name===item);
+    const text=changed
+      ?(known?'✓ 已识别你填写的型号 '+item+'。':'草稿已修改。')+' 尚未提交、尚未写入。'+(!$('reason').value.trim()?'请填写审核理由，再点击“批准 → 模拟写入”。':'理由已填写；点击“批准 → 模拟写入”进行最终校验。')
+      :'审核理由已更新。点击批准提交审核。';
+    message('editFeedback',text,'notice');message('blocker','待重新校验：旧异常属于上一次提交，最终结果以再次批准后的校验为准。','notice');
+    message('lesson','当前正在修订草稿。修改不会自动提交，请完成理由后点击批准。','notice');
+  }catch{message('editFeedback','JSON 格式未完成：请检查逗号和引号，修正后再提交。');}
+}
+function render(s,preservedDraft){
+  current=s;
+  const intent=s.values.extracted?.intent;
+  const intentNames={purchase:'明确购买：检查缺失字段后人工审核',inquiry:'客户询问：由人工处理库存、报价或回复；尚未下单',conditional:'条件购买：由人工确认交期、价格等条件',unclear:'意图不明：由人工向客户补充确认'};
+  $('intent').textContent=intent?intentNames[intent.kind]+'。依据：'+intent.evidence.evidence.quote:'模板模式或尚未完成理解：没有模型意图判断。';
+  if(s.values.extracted?.traceId)$('intent').textContent+=' LangSmith trace ID：'+s.values.extracted.traceId;
+  const facts=s.values.extracted?.facts;
+  const first=name=>facts?.[name]?.[0]?.value||'未识别';
+  $('identityFacts').textContent=`公司：${first('customer')} · 发件人：${first('sender')} · 公司/发件人所在地：${first('location')} · 明确送货地址：${first('address')}`;
+  $('summary').textContent=`状态 ${s.values.status??'理解失败'} · ${s.pending.length?'等待人工审核':s.error?'报错停止':'下个节点 '+(s.next.join(', ')||'END')} · 模拟写入累计 ${s.mockWrites} · thread ${s.id}`;
+  $('sources').textContent=(s.values.sources??[]).map(x=>`${x.source} / page ${x.page}\n${x.text}`).join('\n\n');
+  $('issues').textContent=pretty(s.values.inquiry?{route:'inquiry',inquiry:s.values.inquiry,pending:s.pending}:{route:'order',issues:s.values.issues,pending:s.pending});
+  $('draft').value=preservedDraft??pretty(s.values.draft??null);
+  const inquiry=s.values.inquiry;$('inquiryPanel').hidden=!inquiry;$('orderPanel').hidden=!!inquiry;
+  if(inquiry){
+    $('inquiryFacts').textContent=`公司原文：${inquiry.customerText||'未识别'} · 发件人：${inquiry.senderName||'未识别'} · 回复语言：${inquiry.replyLanguage||'未识别'} · ERP 客户：${inquiry.customer||'未匹配'} · 商品：${inquiry.itemCode||inquiry.itemText||'未识别'} · 数量：${inquiry.quantity||'未识别'} · 记录库存：${inquiry.inventory?.totalActualQty??'未知'}`;
+    $('inquiryNeeds').replaceChildren(...inquiry.needs.map(x=>{const li=document.createElement('li');li.textContent=x;return li;}));
+    $('reply').value=inquiry.responseDraft;
+    document.querySelector('[data-action="approve"]').textContent='批准回复草稿';document.querySelector('[data-action="reject"]').textContent='关闭工单';
+    $('reviewHint').textContent='批准只记录人工决定；当前不会真正发送客户邮件。';
+  } else {
+    document.querySelector('[data-action="approve"]').textContent='批准 → 模拟写入';document.querySelector('[data-action="reject"]').textContent='拒绝';
+    $('reviewHint').textContent='订单批准后只创建 Mock ERP 草稿，不发送邮件或付款信息。';
+  }
+  $('events').textContent=pretty(s.events);$('state').textContent=pretty(s);
+  $('reload').disabled=false;outcome();renderForm();
+  $('progress').textContent=s.error?'流程报错：'+s.error:s.values.status==='created'?'订单：✓ 理解 → ✓ 校验 → ✓ 人工批准 → ✓ Mock ERP 草稿 '+s.values.order:s.values.status==='response-approved'?'询价：✓ 理解 → ✓ 库存查询 → ✓ 人工批准回复草稿':s.values.inquiry?'询价：✓ 理解 → ✓ 库存查询 → ⏸ 回复审核':'订单：✓ 理解 → ✓ 匹配 → ⏸ 订单审核';
+  if(s.error){message('blocker','理解失败：'+s.error+'。未创建订单；请调整虚构邮件后重新发送。');$('status').textContent='邮件已接收，但理解失败：'+s.error;}
+}
+async function run(fn){
+  $('status').textContent='正在执行…';document.querySelectorAll('button').forEach(b=>b.disabled=true);
+  try{await fn();if($('status').textContent==='正在执行…')$('status').textContent='执行完成。';}
+  catch(e){$('status').textContent='未提交成功：'+e.message;message('editFeedback','未提交成功：'+e.message);}
+  finally{document.querySelectorAll('button').forEach(b=>b.disabled=false);$('reload').disabled=!current;document.querySelectorAll('[data-action]').forEach(b=>b.disabled=!current?.pending.length);}
+}
+$('draft').addEventListener('input',edited);$('reply').addEventListener('input',edited);$('reason').addEventListener('input',edited);
+$('draft').addEventListener('change',()=>{try{renderForm();}catch{}});
+$('invoke').onclick=()=>run(async()=>{$('toolResult').textContent='正在调用…';try{$('toolResult').textContent=pretty(await api('tool',JSON.parse($('tool').value)));}catch(e){$('toolResult').textContent=e.message;throw e;}});
+$('fixture').onchange=explainFixture;
+$('scenario').onchange=()=>{$('fixture').value=$('scenario').value;explainFixture();};
+$('start').onclick=()=>run(async()=>{$('reason').value='';explainFixture();render(await api('start',{fixture:$('fixture').value}));});
+$('reload').onclick=()=>run(async()=>render(await api('state',{id:current.id})));
+$('reset').onclick=()=>run(async()=>{const result=await api('reset',{});current=undefined;$('draft').value='';$('reason').value='';$('sources').textContent='等待导入';$('issues').textContent='等待匹配';$('events').textContent='等待执行';$('state').textContent='';message('blocker','');message('editFeedback','');$('summary').textContent='练习数据已清空。请选择样例并新建练习。';$('status').textContent='✓ '+result.message;explainFixture();});
+document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>run(async()=>{
+  const inquiry=current.pending[0]?.kind==='inquiry';
+  const draftText=$('draft').value;
+  const action=inquiry?({approve:'approve-reply','request-info':'request-info',reject:'close'}[b.dataset.action]):b.dataset.action;
+  const decision=inquiry?{action,revision:current.values.revision,actor:'learning-operator',reason:$('reason').value,responseDraft:$('reply').value}
+    :{action,revision:current.values.revision,actor:'learning-operator',reason:$('reason').value,draft:JSON.parse(draftText)};
+  const result=await api('decide',{id:current.id,decision});
+  const rejectedInput=result.pending.some(p=>p.feedback);
+  render(result,!inquiry&&rejectedInput?draftText:undefined);
+  await refreshInbox();
+}));
+function renderForm(){
+  if(!document.createElement)return;
+  const root=$('reviewForm');root.replaceChildren();
+  const draft=JSON.parse($('draft').value||'null');if(!draft)return;
+  function field(title,value,options,save){
+    const label=document.createElement('label');label.textContent=title;
+    const input=document.createElement(options?'select':'input');
+    if(options)for(const [v,text] of options){const option=document.createElement('option');option.value=v;option.textContent=text;input.append(option);}
+    input.value=value??'';input.disabled=!current.pending.length;
+    input.oninput=()=>{save(input.value);$('draft').value=pretty(draft);edited();};label.append(input);root.append(label);
+  }
+  for(const [key,title] of [['customer','客户编码'],['po','采购单号 PO'],['date','交付日期'],['address','收货地址编码']])field(title,draft[key],null,v=>draft[key]=v);
+  for(const [index,line] of draft.lines.entries()){
+    field('商品 '+(index+1),line.item,[['','请选择确认后的商品'],...(current.values.items??[]).map(i=>[i.name,i.item_name+' · '+i.name])],v=>{line.item=v;line.unit=current.values.items.find(i=>i.name===v)?.stock_uom??line.unit;});
+    field('数量',line.quantity,null,v=>line.quantity=v);field('单位',line.unit,null,v=>line.unit=v);
+  }
+  if(current.pending.length){const add=document.createElement('button');add.textContent='补充商品行';add.onclick=()=>{draft.lines.push({description:'',item:'',quantity:'',unit:''});$('draft').value=pretty(draft);renderForm();edited();};root.append(add);}
+}
+async function refreshInbox(){
+  const result=await api('inbox',{});const root=$('inbox');root.replaceChildren();
+  const names={review:'订单待审核','inquiry-review':'询价待回复',approved:'已批准',created:'订单草稿已创建',rejected:'已拒绝','response-approved':'回复草稿已批准',closed:'已关闭','needs-info':'待补充',error:'报错'};
+  if(!result.messages.length)root.textContent='收件箱为空。填入样例并发送第一封模拟邮件。';
+  for(const mail of result.messages){const button=document.createElement('button');button.textContent=mail.subject+' · '+(names[mail.status]??mail.status)+(mail.order?' · '+mail.order:'');button.onclick=()=>run(async()=>{$('reason').value='';render(await api('state',{id:mail.id}));});root.append(button);}
+}
+$('loadMail').onclick=()=>run(async()=>{const fixture=$('scenario').value;const result=await api('template',{fixture});$('mailBody').value=result.sources.find(s=>s.source==='email').text;$('attachment').value=result.sources.filter(s=>s.source==='pdf').map(s=>s.text).join('\n');$('subject').value='虚构订单 · '+$('scenario').selectedOptions[0].textContent;$('fixture').value=fixture;explainFixture();});
+$('sendMail').onclick=()=>run(async()=>{$('reason').value='';render(await api('send',{subject:$('subject').value,email:$('mailBody').value,attachment:$('attachment').value,mode:$('mailMode').value}));await refreshInbox();});
+$('naturalExample').onclick=()=>{$('mailMode').value='gemini';$('subject').value='虚构客户咨询';$('mailBody').value='你好，我是 Nieminen Auto Workshop 的 Mia Example。我们的送货地址是 99 Fictional Road, Helsinki。FILTER-A10 还有货吗？想了解 5 个的价格，如果下周五之前能到，我们就考虑购买。谢谢！';$('attachment').value='';message('lesson','已填入自然语言询价：请发送后观察公司、发件人和明确送货地址如何分别保留证据。','notice');};
+$('refreshInbox').onclick=()=>run(refreshInbox);
+const oldReset=$('reset').onclick;
+$('reset').onclick=async()=>{await oldReset();$('reviewForm').replaceChildren();await run(refreshInbox);};
+</script></html>

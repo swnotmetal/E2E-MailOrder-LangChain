@@ -1,0 +1,13 @@
+Customer_ID,Customer_Name,Customer_Type,Contact_Name,Contact_Email,Territory
+ACME,Acme Workshop,B2B,Mia Example,mia@example.com,Helsinki
+KRASOVEC,Krašovec Avtoservis,B2B,Luka Novak,luka@example.com,Ljubljana
+MESSERSCHMITT,Messerschmitt & Sons,B2B,Gavin Livingson,gavin@example.com,Little Rock
+CUST-004,Fictional Customer 4,B2C,Contact 4,contact4@example.com,Berlin
+CUST-005,Fictional Customer 5,B2C,Contact 5,contact5@example.com,Madrid
+CUST-006,Fictional Customer 6,B2B,Contact 6,contact6@example.com,Madrid
+CUST-007,Fictional Customer 7,B2B,Contact 7,contact7@example.com,Paris
+CUST-008,Fictional Customer 8,B2C,Contact 8,contact8@example.com,Madrid
+CUST-009,Fictional Customer 9,B2C,Contact 9,contact9@example.com,Berlin
+CUST-010,Fictional Customer 10,B2B,Contact 10,contact10@example.com,Paris
+CUST-011,Fictional Customer 11,B2C,Contact 11,contact11@example.com,Paris
+CUST-012,Fictional Customer 12,B2B,Contact 12,contact12@example.com,London

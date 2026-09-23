@@ -1,0 +1,31 @@
+Item_Code,Item_Name,Category,Brand,Stock_UOM,Is_Stock_Item,Selling_Price_EUR,Min_Stock_Level,Description
+FILTER-A10,Filter A10,Accessories,FilterBrand,Nos,1,12.50,10,Standard filter A10
+FILTER-A20,Filter A20,Accessories,FilterBrand,Nos,1,18.90,10,Premium filter A20
+THERM-B1,Thermostat Basic,HVAC,ThermoCorp,Nos,1,45.00,5,Basic home thermostat
+THERM-P1,Thermostat Pro,HVAC,ThermoCorp,Nos,1,85.00,5,Programmable thermostat
+THERM-S1,Smart Thermostat V1,HVAC,ThermoCorp,Nos,1,120.00,10,Wifi connected thermostat
+AMBIG-12V,Standard Relay 12V,Electrics,Bolt,Nos,1,5.00,20,12 Volt relay
+AMBIG-24V,Standard Relay 24V,Electrics,Bolt,Nos,1,6.00,20,24 Volt relay
+NON-STOCK-01,Cloud Software License 1Yr,Software,TechSoft,Nos,0,99.00,0,1 year subscription
+ITEM-GEN-009,Generic Part 009,Misc,GenCorp,Nos,1,12.59,7,Description for generic part 9
+ITEM-GEN-010,Generic Part 010,Misc,GenCorp,Nos,1,116.50,13,Description for generic part 10
+ITEM-GEN-011,Generic Part 011,Misc,GenCorp,Nos,1,20.62,6,Description for generic part 11
+ITEM-GEN-012,Generic Part 012,Misc,GenCorp,Nos,1,59.97,22,Description for generic part 12
+ITEM-GEN-013,Generic Part 013,Misc,GenCorp,Nos,1,53.17,6,Description for generic part 13
+ITEM-GEN-014,Generic Part 014,Misc,GenCorp,Nos,1,28.15,15,Description for generic part 14
+ITEM-GEN-015,Generic Part 015,Misc,GenCorp,Nos,1,86.34,12,Description for generic part 15
+ITEM-GEN-016,Generic Part 016,Misc,GenCorp,Nos,1,28.75,18,Description for generic part 16
+ITEM-GEN-017,Generic Part 017,Misc,GenCorp,Nos,1,117.17,24,Description for generic part 17
+ITEM-GEN-018,Generic Part 018,Misc,GenCorp,Nos,1,59.75,5,Description for generic part 18
+ITEM-GEN-019,Generic Part 019,Misc,GenCorp,Nos,1,50.74,19,Description for generic part 19
+ITEM-GEN-020,Generic Part 020,Misc,GenCorp,Nos,1,19.80,6,Description for generic part 20
+ITEM-GEN-021,Generic Part 021,Misc,GenCorp,Nos,1,18.45,9,Description for generic part 21
+ITEM-GEN-022,Generic Part 022,Misc,GenCorp,Nos,1,23.31,5,Description for generic part 22
+ITEM-GEN-023,Generic Part 023,Misc,GenCorp,Nos,1,47.31,18,Description for generic part 23
+ITEM-GEN-024,Generic Part 024,Misc,GenCorp,Nos,1,88.14,13,Description for generic part 24
+ITEM-GEN-025,Generic Part 025,Misc,GenCorp,Nos,1,73.05,6,Description for generic part 25
+ITEM-GEN-026,Generic Part 026,Misc,GenCorp,Nos,1,116.48,15,Description for generic part 26
+ITEM-GEN-027,Generic Part 027,Misc,GenCorp,Nos,1,80.64,20,Description for generic part 27
+ITEM-GEN-028,Generic Part 028,Misc,GenCorp,Nos,1,35.00,24,Description for generic part 28
+ITEM-GEN-029,Generic Part 029,Misc,GenCorp,Nos,1,97.62,23,Description for generic part 29
+ITEM-GEN-030,Generic Part 030,Misc,GenCorp,Nos,1,122.35,15,Description for generic part 30

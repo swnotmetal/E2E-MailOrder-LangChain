@@ -1,0 +1,13 @@
+Address_ID,Customer_ID,Address_Type,Address_Line1,City,Postal_Code,Country
+ACME-SHIPPING,ACME,Shipping,10 Test Road,Helsinki,00100,Finland
+KRASOVEC-SHIPPING,KRASOVEC,Shipping,15 Example Street,Ljubljana,1000,Slovenia
+MESSERSCHMITT-SHIPPING,MESSERSCHMITT,Shipping,50 Fictional Avenue,Little Rock,00000,USA
+CUST-004-SHIPPING,CUST-004,Shipping,46 Random St,Random City,12345,Fictionalia
+CUST-005-SHIPPING,CUST-005,Shipping,88 Random St,Random City,12345,Fictionalia
+CUST-006-SHIPPING,CUST-006,Shipping,35 Random St,Random City,12345,Fictionalia
+CUST-007-SHIPPING,CUST-007,Shipping,56 Random St,Random City,12345,Fictionalia
+CUST-008-SHIPPING,CUST-008,Shipping,82 Random St,Random City,12345,Fictionalia
+CUST-009-SHIPPING,CUST-009,Shipping,54 Random St,Random City,12345,Fictionalia
+CUST-010-SHIPPING,CUST-010,Shipping,1 Random St,Random City,12345,Fictionalia
+CUST-011-SHIPPING,CUST-011,Shipping,14 Random St,Random City,12345,Fictionalia
+CUST-012-SHIPPING,CUST-012,Shipping,80 Random St,Random City,12345,Fictionalia

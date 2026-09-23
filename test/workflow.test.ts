@@ -8,7 +8,7 @@ import { Command } from '@langchain/langgraph';
 import { readSources, templateExtractor, verifyEvidence } from '../src/input.js';
 import { workflow } from '../src/workflow.js';
 import { FrappeERP } from '../src/erp.js';
-import { validate, type Decision } from '../src/domain.js';
+import { validate, type Decision, type InquiryDecision } from '../src/domain.js';
 import { mockERP } from './mock-erp.js';
 
 async function setup() {
@@ -37,7 +37,7 @@ test('clean order interrupts before HTTP write then creates a draft',async()=>{
 test('ambiguous description stays unresolved and approval loops back',async()=>{
   const x=await setup();try {
     await x.graph.invoke({sources:await sources('02-ambiguous')},config());const s=await x.graph.getState(config());
-    assert.equal(s.values.draft.lines[0].item,'');assert.equal(s.values.items.length,2);
+    assert.equal(s.values.draft.lines[0].item,'');assert.ok(s.values.items.some((i:any)=>i.name==='FILTER-A10'));assert.ok(s.values.items.some((i:any)=>i.name==='FILTER-A20'));
     await x.graph.invoke(new Command({resume:approve(s.values)}),config());assert.equal(x.mock.posts,0);assert.equal((await x.graph.getState(config())).values.status,'review');
   }finally{await x.close();}
 });
@@ -109,6 +109,61 @@ test('deterministic quantity/date bounds',()=>{
 test('field values that repeat label names still have exact offsets',async()=>{
   const input=[{source:'email' as const,page:0,text:'Customer: Customer\nPO: PO\nItem: Item | 2 | Nos\n'}];
   const e=await templateExtractor(input);verifyEvidence(e,input);assert.equal(e.facts.customer[0].value,'Customer');
+});
+test('fixture-backed ERP isolates addresses, stock states and historical customer PO',async()=>{
+  const x=await setup();try {
+    assert.deepEqual((await x.erp.addresses('KRASOVEC')).map(a=>a.name),['KRASOVEC-SHIPPING']);
+    assert.equal((await x.erp.inventory('FILTER-A10')).totalActualQty,12);
+    assert.equal((await x.erp.inventory('FILTER-A20')).totalActualQty,0);
+    assert.equal((await x.erp.inventory('NON-STOCK-01')).totalActualQty,null);
+    const history={customer:'ACME',po:'CUST-PO-999',date:'2027-02-20',address:'ACME-SHIPPING',lines:[{description:'Filter A10',item:'FILTER-A10',quantity:'1',unit:'Nos'}]};
+    assert.equal((await x.erp.duplicates(history)).length,1);
+  }finally{await x.close();}
+});
+test('inquiry and conditional intents use reply review without order validation or ERP writes',async()=>{
+  for(const kind of ['inquiry','conditional','unclear'] as const){
+    const x=await setup();try{
+      const graph=workflow(x.erp,x.saver,async input=>{const e=await templateExtractor(input);return {...e,intent:{kind,evidence:e.facts.po[0]}};});
+      await graph.invoke({sources:await sources()},config());
+      const s=await graph.getState(config());
+      assert.equal(s.values.status,'inquiry-review');assert.deepEqual(s.values.issues,[]);
+      assert.equal(s.values.inquiry.itemCode,'FILTER-A10');assert.equal(s.values.inquiry.inventory.totalActualQty,12);
+      assert.match(s.values.inquiry.responseDraft,/Our team is confirming availability, the applicable price, and the expected delivery date/);
+      assert.match(s.values.inquiry.responseDraft,/so you can decide whether to proceed/);
+      assert.doesNotMatch(s.values.inquiry.responseDraft,/No order has been created/);
+      if(kind==='conditional') assert.match(s.values.inquiry.responseDraft,/delivery timing matters before you decide/);
+      assert.equal((s.tasks[0].interrupts[0].value as any).kind,'inquiry');
+      const decision:InquiryDecision={action:'approve-reply',revision:s.values.revision,actor:'test-operator',reason:'Checked fictional reply',responseDraft:s.values.inquiry.responseDraft};
+      await graph.invoke(new Command({resume:decision}),config());
+      assert.equal((await graph.getState(config())).values.status,'response-approved');assert.equal(x.mock.posts,0);
+    }finally{await x.close();}
+  }
+});
+test('a unique model token maps conversational A10 text without weakening generic ambiguity',async()=>{
+  const x=await setup();try{
+    const text='We are interested in 50 type a10 filters.';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const empty={value:'',evidence:{source:'email' as const,page:0,start:0,end:0,quote:''}};
+    const input=[{source:'email' as const,page:0,text}];
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[],sender:[],location:[],po:[],date:[],address:[]},
+      intent:{kind:'conditional' as const,evidence:fact('interested')},lines:[{description:fact('type a10 filters'),quantity:fact('50'),unit:empty}]}));
+    await graph.invoke({sources:input},config('model-token'));
+    const s=await graph.getState(config('model-token'));
+    assert.equal(s.values.inquiry.itemCode,'FILTER-A10');assert.equal(s.values.status,'inquiry-review');assert.equal(x.mock.posts,0);
+  }finally{await x.close();}
+});
+test('inquiry fallback reply follows a Chinese customer message',async()=>{
+  const x=await setup();try{
+    const text='您好，我想了解 5 个 FILTER-A10 的库存和价格。';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const empty={value:'',evidence:{source:'email' as const,page:0,start:0,end:0,quote:''}};
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[],sender:[],location:[],po:[],date:[],address:[]},
+      intent:{kind:'inquiry' as const,evidence:fact('想了解')},lines:[{description:fact('FILTER-A10'),quantity:fact('5'),unit:empty}]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('chinese-reply'));
+    const s=await graph.getState(config('chinese-reply'));
+    assert.match(s.values.inquiry.responseDraft,/您好/);assert.match(s.values.inquiry.responseDraft,/核对库存、适用价格和预计交期/);
+    assert.doesNotMatch(s.values.inquiry.responseDraft,/Our team/);assert.equal(x.mock.posts,0);
+  }finally{await x.close();}
 });
 test('same PO with changed approved content is never silently reused',async()=>{
   const x=await setup();try {
