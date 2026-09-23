@@ -15,7 +15,7 @@ All examples and fixture records are fictional. The project deliberately has no 
 - idempotency and reconciliation after uncertain writes;
 - explicit separation of mock tests, live integration evidence, and unverified claims.
 
-Current evidence: a local ERPNext instance has previously completed human-approved Draft creation and duplicate-order checks; Gemini natural-language extraction, grounded same-language reply drafting, and read-only inventory lookup have also been exercised. Successful LangSmith extraction and reply traces exist; a successful standalone inventory-tool trace is still pending. See [the learning handoff](docs/learning-handoff-2026-09-21.md) and [model notes](docs/model.md) for the precise evidence status.
+Current evidence: a local ERPNext instance has previously completed human-approved Draft creation and duplicate-order checks. A fictional inquiry has also produced one complete LangSmith LangGraph trace containing Gemini extraction, two read-only inventory Tool spans, grounded reply drafting, and the human-review interrupt. The approved reply was read back as LangSmith feedback on that root run. See [verification notes](docs/verification.md) and [model notes](docs/model.md) for the precise evidence status.
 
 ## Quick start
 
@@ -101,7 +101,7 @@ Set `GOOGLE_API_KEY` and `ORDER_EXTRACTOR=gemini` to enable live extraction. Set
 - `.env`, `.env.erp`, `data/`, local Miko state, dependency folders, ERP containers, logs, coverage, and temporary/backup files are ignored.
 - Only the repository-specific `order-review` Skill is committed; the larger locally imported Skill library stays ignored.
 - This is an engineering learning project, not a claim of production readiness, commercial ROI, or labor savings.
-- Full MIME/OCR ingestion, authentication/RBAC, a production queue, an email provider connector, and a verified successful LangSmith tool trace remain future work.
+- Full MIME/OCR ingestion, authentication/RBAC, a production queue, an email provider connector, and a human-owned LangSmith evaluation dataset remain future work.
 
 Development scenarios are described in [docs/design.md](docs/design.md). Human-owned gold data and evaluation limits are described in [docs/evaluation.md](docs/evaluation.md). Historical verification notes are in [docs/verification.md](docs/verification.md).
 

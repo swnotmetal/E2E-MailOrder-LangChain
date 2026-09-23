@@ -1,6 +1,7 @@
 import { Annotation, StateGraph, START, END, interrupt } from '@langchain/langgraph';
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { type ERP } from './erp.js';
+import { inventoryTool } from './model.js';
 import { templateExtractor, verifyEvidence, type Extractor } from './input.js';
 import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type Decision, type InquiryCase, type InquiryLine,
   DecisionSchema, InquiryDecisionSchema, validate, normalize, digest, fields } from './domain.js';
@@ -83,6 +84,7 @@ const templateReplyDrafter:InquiryReplyDrafter=async inquiry=>({
 });
 
 export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor, draftReply:InquiryReplyDrafter=templateReplyDrafter) {
+  const inventoryReader=inventoryTool(erp);
   async function checkERP(d:Draft) {
     const [customers,items,addresses] = await Promise.all([erp.customers(),erp.items(),d.customer?erp.addresses(d.customer):Promise.resolve([])]);
     const issues = validate(d);
@@ -116,7 +118,7 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
         const base={itemText,itemCode,quantity:line.quantity.value};
         if(!itemCode) return {...base,status:'unresolved',inventory:null} as InquiryLine;
         try {
-          const stock=await erp.inventory(itemCode);
+          const stock=await inventoryReader.invoke({itemCode});
           const inventory={stockTracked:stock.stockTracked,totalActualQty:stock.totalActualQty};
           const status=!stock.stockTracked||stock.totalActualQty===null?'untracked':stock.totalActualQty===0?'out-of-stock':'recorded-stock';
           return {...base,status,inventory} as InquiryLine;

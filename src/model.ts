@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { tool } from '@langchain/core/tools';
 import { Client, RunTree } from 'langsmith';
+import { getCurrentRunTree } from 'langsmith/traceable';
 import { z } from 'zod';
 import { type Extraction, type Fact, type InquiryCase, type Source } from './domain.js';
 import { type FrappeERP, type Inventory } from './erp.js';
@@ -70,6 +71,12 @@ async function budgetedGeminiCall(dataDir:string,body:GeminiRequest):Promise<Mod
   } finally {ledger.db.close();}
 }
 const generationConfig=(maxOutputTokens:number)=>({maxOutputTokens,temperature:0,thinkingConfig:{thinkingBudget:0}});
+function childOrRootRun(name:string,run_type:string,inputs:Record<string,unknown>) {
+  const client=new Client({apiKey:process.env.LANGSMITH_API_KEY,apiUrl:process.env.LANGSMITH_ENDPOINT});
+  const parent=getCurrentRunTree(true);
+  return parent?parent.createChild({name,run_type,inputs}):new RunTree({name,run_type,
+    project_name:process.env.LANGSMITH_PROJECT??'order-review-demo',inputs,client});
+}
 
 const mailProposal=z.object({
   intent:z.enum(['purchase','inquiry','conditional','unclear']),intentEvidence:span,
@@ -132,7 +139,7 @@ export function geminiMailExtractor(dataDir:string) {
   return async(sources:Source[]):Promise<Extraction>=>{
     const input=JSON.stringify(sources.map((s,sourceIndex)=>({...s,sourceIndex})));
     if(Buffer.byteLength(input,'utf8')>8000) throw Error('MODEL_INPUT_LIMIT: mail exceeds 8000 bytes');
-    const trace=process.env.ORDER_TRACE==='true' && process.env.LANGSMITH_API_KEY?new RunTree({name:'fictional-mail-understanding',run_type:'llm',project_name:process.env.LANGSMITH_PROJECT??'order-review-demo',inputs:{sources,model:MODEL_ID},client:new Client({apiKey:process.env.LANGSMITH_API_KEY,apiUrl:process.env.LANGSMITH_ENDPOINT})}):undefined;
+    const trace=process.env.ORDER_TRACE==='true' && process.env.LANGSMITH_API_KEY?childOrRootRun('fictional-mail-understanding','llm',{sources,model:MODEL_ID}):undefined;
     if(trace)await trace.postRun();
     try {
       const response=await budgetedGeminiCall(dataDir,{generationConfig:generationConfig(2500),
@@ -140,7 +147,7 @@ export function geminiMailExtractor(dataDir:string) {
         contents:[{role:'user',parts:[{text:input}]}],tools:[{functionDeclarations:[{name:'understand_mail',description:'Grounded intent and order facts',parametersJsonSchema:z.toJSONSchema(mailProposal)}]}],toolConfig:{functionCallingConfig:{mode:'ANY',allowedFunctionNames:['understand_mail']}}});
       const call=response.content.find(c=>c.name==='understand_mail');if(!call)throw Error('MODEL_NO_MAIL_UNDERSTANDING');
       const result=verifyMailProposal(call.input,sources);
-      if(trace){await trace.end({extraction:result,usage:response.usage});await trace.patchRun();result.traceId=trace.id;}
+      if(trace){await trace.end({extraction:result,usage:response.usage});await trace.patchRun();result.traceId=trace.trace_id;}
       return result;
     }catch(error){if(trace){await trace.end(undefined,error instanceof Error?error.message:'Unknown error');await trace.patchRun().catch(()=>{});}throw error;}
   };
@@ -153,9 +160,7 @@ export function geminiInquiryReply(dataDir:string) {
     const input=JSON.stringify({language:inquiry.replyLanguage,senderName:inquiry.senderName,intent:inquiry.intent,
       condition:inquiry.condition,requestedDate:inquiry.requestedDate,lines:inquiry.lines,needs:inquiry.needs});
     if(Buffer.byteLength(input,'utf8')>10000) throw Error('MODEL_REPLY_INPUT_LIMIT');
-    const trace=process.env.ORDER_TRACE==='true' && process.env.LANGSMITH_API_KEY?new RunTree({name:'fictional-inquiry-reply',run_type:'llm',
-      project_name:process.env.LANGSMITH_PROJECT??'order-review-demo',inputs:{inquiry:JSON.parse(input),model:MODEL_ID},
-      client:new Client({apiKey:process.env.LANGSMITH_API_KEY,apiUrl:process.env.LANGSMITH_ENDPOINT})}):undefined;
+    const trace=process.env.ORDER_TRACE==='true' && process.env.LANGSMITH_API_KEY?childOrRootRun('fictional-inquiry-reply','llm',{inquiry:JSON.parse(input),model:MODEL_ID}):undefined;
     if(trace)await trace.postRun();
     try {
       const response=await budgetedGeminiCall(dataDir,{generationConfig:generationConfig(2000),
@@ -165,7 +170,7 @@ export function geminiInquiryReply(dataDir:string) {
       const call=response.content.find(c=>c.type==='tool_use'&&c.name==='draft_inquiry_reply');
       if(!call)throw Error('MODEL_NO_REPLY_DRAFT');
       const parsed=inquiryReplyProposal.parse(call.input);
-      const result={draft:parsed.draft,language:inquiry.replyLanguage,model:MODEL_ID,traceId:trace?.id};
+      const result={draft:parsed.draft,language:inquiry.replyLanguage,model:MODEL_ID,traceId:trace?.trace_id};
       if(trace){await trace.end({...result,usage:response.usage});await trace.patchRun();}
       return result;
     } catch(error) {
@@ -173,6 +178,16 @@ export function geminiInquiryReply(dataDir:string) {
       throw error;
     }
   };
+}
+
+export async function recordHumanReviewFeedback(runId:string,input:{action:string;actor:string;reason:string;correction:Record<string,unknown>}) {
+  if(process.env.ORDER_TRACE!=='true'||!process.env.LANGSMITH_API_KEY)return undefined;
+  const client=new Client({apiKey:process.env.LANGSMITH_API_KEY,apiUrl:process.env.LANGSMITH_ENDPOINT});
+  const project=await client.readProject({projectName:process.env.LANGSMITH_PROJECT??'order-review-demo'});
+  const feedback=await client.createFeedback({runId,sessionId:project.id,key:'human_review_approved',
+    score:input.action==='approve'||input.action==='approve-reply',value:input.action,
+    correction:input.correction,comment:input.reason,sourceInfo:{actor:input.actor},feedbackSourceType:'app'});
+  return feedback.id;
 }
 
 export async function geminiInventoryAnswer(question:string,erp:Pick<FrappeERP,'inventory'>,dataDir:string) {

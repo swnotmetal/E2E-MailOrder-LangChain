@@ -9,13 +9,16 @@ import { mockERP } from '../src/mock-erp.js';
 import { FrappeERP } from '../src/erp.js';
 import { workflow } from '../src/workflow.js';
 import { readSources } from '../src/input.js';
-import { DecisionSchema, InquiryDecisionSchema } from '../src/domain.js';
-import { inventoryTool, geminiInquiryReply, geminiMailExtractor } from '../src/model.js';
+import { DecisionSchema, InquiryDecisionSchema, type Decision, type InquiryDecision } from '../src/domain.js';
+import { inventoryTool, geminiInquiryReply, geminiMailExtractor, recordHumanReviewFeedback } from '../src/model.js';
 import { resolve } from 'node:path';
 
 export async function startLearningLab(port=3210) {
-  // Graph auto-tracing stays off; Gemini mode uses explicit model tracing only.
-  process.env.LANGSMITH_TRACING='false'; process.env.LANGCHAIN_TRACING_V2='false';
+  const configureTracing=()=>{
+    const enabled=process.env.ORDER_TRACE==='true'&&!!process.env.LANGSMITH_API_KEY;
+    process.env.LANGSMITH_TRACING=enabled?'true':'false';process.env.LANGCHAIN_TRACING_V2=enabled?'true':'false';
+  };
+  configureTracing();
   const remoteMockBase=process.env.LEARN_ERP_BASE_URL?.trim();
   const ownedMock=remoteMockBase?null:await mockERP();
   const erpBase=remoteMockBase||ownedMock!.url;
@@ -82,21 +85,24 @@ export async function startLearningLab(port=3210) {
           await resetMock();threads.clear();mailbox.clear();
           res.end(JSON.stringify({reset:true,mockWrites:0,message:'练习数据已清空'}));return;
         }
-        let id:string;
+        let id:string, humanDecision:Decision|InquiryDecision|undefined;
+        let feedback:undefined|{id?:string;error?:string};
         if(req.url==='/api/send') {
           const mail=z.object({subject:z.string().trim().min(1).max(160),email:z.string().min(1).max(12000),attachment:z.string().max(12000),mode:z.enum(['template','gemini']).default('template')}).parse(input);
           id=randomUUID();threads.add(id);mailbox.set(id,{subject:mail.subject,events});
           const sources=[{source:'email' as const,page:0,text:mail.email},...(mail.attachment.trim()?[{source:'pdf' as const,page:1,text:mail.attachment}]:[])];
           try {
-            if(mail.mode==='gemini') {try{process.loadEnvFile('.env');}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}}
-            for await(const event of await (mail.mode==='gemini'?modelGraph:graph).stream({sources},{configurable:{thread_id:id},streamMode:'updates'})) events.push(event);
+            if(mail.mode==='gemini') {try{process.loadEnvFile('.env');}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}configureTracing();}
+            for await(const event of await (mail.mode==='gemini'?modelGraph:graph).stream({sources},{configurable:{thread_id:id},streamMode:'updates',
+              tags:['fictional-email','learning-lab'],metadata:{thread_id:id,subject:mail.subject}})) events.push(event);
           } catch(error) {mailbox.get(id)!.error=error instanceof Error?error.message:'Unknown error';}
         } else if(req.url==='/api/start') {
           const {fixture}=z.object({fixture:z.enum(['01-clean','02-ambiguous','03-quantity-conflict'])}).parse(input);
           await resetMock();threads.clear();mailbox.clear();
           id=randomUUID();threads.add(id);
           const sources=await readSources(`fixtures/${fixture}.eml`,`fixtures/${fixture}.pdf`);
-          for await(const event of await graph.stream({sources},{configurable:{thread_id:id},streamMode:'updates'})) events.push(event);
+          for await(const event of await graph.stream({sources},{configurable:{thread_id:id},streamMode:'updates',
+            tags:['fictional-email','learning-lab','template'],metadata:{thread_id:id,fixture}})) events.push(event);
         } else {
           id=z.string().uuid().parse(input.id);if(!threads.has(id)) throw Error('UNKNOWN_SESSION');
           if(req.url==='/api/decide') {
@@ -104,13 +110,22 @@ export async function startLearningLab(port=3210) {
             if(!current.tasks.some(t=>t.interrupts.length)) throw Error('NO_PENDING_REVIEW');
             const pending=current.tasks.flatMap(t=>t.interrupts.map(i=>i.value))[0] as {kind?:string};
             const decision=(pending.kind==='inquiry'?InquiryDecisionSchema:DecisionSchema).parse(input.decision);
-            for await(const event of await graph.stream(new Command({resume:decision}),{configurable:{thread_id:id},streamMode:'updates'})) events.push(event);
+            humanDecision=decision;
+            for await(const event of await graph.stream(new Command({resume:decision}),{configurable:{thread_id:id},streamMode:'updates',
+              tags:['fictional-email','learning-lab','human-review'],metadata:{thread_id:id,subject:mailbox.get(id)?.subject??''}})) events.push(event);
           }
         }
         const state=await graph.getState({configurable:{thread_id:id}});
+        if(humanDecision) {
+          const runId=state.values.inquiry?.replyTraceId??state.values.extracted?.traceId;
+          if(runId) try {
+            const correction='responseDraft' in humanDecision?{responseDraft:humanDecision.responseDraft}:{draft:humanDecision.draft};
+            feedback={id:await recordHumanReviewFeedback(runId,{action:humanDecision.action,actor:humanDecision.actor,reason:humanDecision.reason,correction})};
+          } catch(error) {feedback={error:error instanceof Error?error.message:'Unknown feedback error'};}
+        }
         const mail=mailbox.get(id);
         if(mail && mail.events!==events) mail.events.push(...events);
-        res.end(JSON.stringify({id,error:mail?.error,mode:'Mock ERP / real LangGraph / optional Gemini',events:mail?.events??events,values:state.values,next:state.next,
+        res.end(JSON.stringify({id,error:mail?.error,feedback,mode:'Mock ERP / real LangGraph / optional Gemini',events:mail?.events??events,values:state.values,next:state.next,
           pending:state.tasks.flatMap(t=>t.interrupts.map(i=>i.value)),mockWrites:await mockWrites()}));
       } finally {busy=false;}
     } catch(error) {res.writeHead(400).end(JSON.stringify({error:error instanceof Error?error.message:'Unknown error'}));}

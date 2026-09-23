@@ -1,5 +1,12 @@
 > 2026-09-22 当前约束：所有后续模型调用严格只用 Gemini 2.5 Flash-Lite（`gemini-2.5-flash-lite`），使用 GOOGLE_API_KEY / ORDER_EXTRACTOR=gemini。下文旧供应商记录仅为历史，不构成继续调用的授权。用户已于 2026-09-22 撤销两次 / $0.05 本地限制，保留历史账本；额度或限流错误停止，不自动重试或切换。下文预算限制仅为历史记录；已发生一次旧供应商 401 请求。
 
+## 2026-09-23 完整 LangGraph trace 与人工反馈
+
+- 使用虚构英文询价真实运行固定模型；根 trace `01a0cf70-9d51-7099-9196-a321f7f06f3f` 包含 `extract`、`prepareInquiry`、`draftInquiryReply` 和 `inquiryReview` 图节点。
+- `extract` 下包含 Gemini 邮件理解 LLM span；`prepareInquiry` 下包含两个 `get_inventory` Tool span；`draftInquiryReply` 下包含 Gemini 回复 LLM span。FILTER-A20 的库存快照为 0，THERM-S1 为 40。
+- 图停在人工 interrupt，Mock ERP 写入为 0。人工批准回复后，LangSmith feedback `01a0cf71-2081-77fa-b8da-a4d976bd46c8` 已通过 API 读回：key 为 `human_review_approved`、score 为 1、value 为 `approve-reply`，并保存被批准的回复草稿 correction。
+- interrupt 后的恢复是同一 `thread_id` 下的后续 trace；人工 feedback 关联到原始处理根 run。以上是一次真实集成证据，不代表抽取准确率、生产稳定性或真实客户邮件处理能力。
+
 ## 2026-09-23 ERP 后同语种回复节点
 
 - 使用虚构芬兰语询价真实运行固定模型两次：抽取 trace `01a0cf4f-2af2-7000-8000-0014486bc30f`，回复 trace `01a0cf4f-33d6-7000-8000-0365cc84ca3d`。

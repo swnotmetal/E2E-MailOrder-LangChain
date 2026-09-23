@@ -40,7 +40,8 @@ function outcome(){
     message('lesson',text);message('blocker',text+' 这属于技术失败；请检查模型输出或服务状态后重试，不要通过猜测修改客户原文。');message('editFeedback','');$('status').textContent=text;return;
   }
   if(s.values.status==='response-approved'){
-    const text='✓ 回复草稿已由人工批准。本练习不会真正发送邮件，也没有创建订单。';
+    const feedback=s.feedback?.id?' LangSmith feedback 已记录：'+s.feedback.id:s.feedback?.error?' LangSmith feedback 记录失败：'+s.feedback.error:'';
+    const text='✓ 回复草稿已由人工批准。本练习不会真正发送邮件，也没有创建订单。'+feedback;
     message('lesson',text,'ok');message('blocker','');message('editFeedback',text,'ok');$('status').textContent=text;return;
   }
   if(s.values.status==='closed'){message('lesson','询价工单已关闭；没有发送邮件或创建订单。','ok');message('blocker','');return;}

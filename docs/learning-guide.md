@@ -2,7 +2,7 @@
 
 ## 自然语言邮件（当前入口）
 
-收件箱默认 Gemini 2.5 Flash-Lite 模式，通过共享 `src/model.ts` 入口读取 `.env` 中的 `GOOGLE_API_KEY`。点击“填入自然语言询问”或自行写虚构邮件，再发送。模板模式仍可选且不调用模型。`ORDER_TRACE=true` 且配置 LangSmith 密钥时，记录邮件理解的 LLM trace；页面显示成功 trace ID，完整图节点日志仍在本地。
+收件箱默认 Gemini 2.5 Flash-Lite 模式，通过共享 `src/model.ts` 入口读取 `.env` 中的 `GOOGLE_API_KEY`。点击“填入自然语言询问”或自行写虚构邮件，再发送。模板模式仍可选且不调用模型。`ORDER_TRACE=true` 且配置 LangSmith 密钥时，LangGraph 根 trace 会包含抽取、只读库存 Tool、回复生成和人工 interrupt；批准回复后，人工决定还会作为 feedback 关联到原根 run。
 
 模型提出 purchase / inquiry / conditional / unclear 意图及原文证据。非明确购买必须由人工获得客户确认、勾选确认并填写依据，才能继续批准；不满足条件会再次 interrupt。未知商品、缺少 PO/单位/地址、中文数量或相对日期由人工核对，不能伪造原文值。引用不唯一或 API 错误会停止，不自动降级或重试。
 
@@ -48,11 +48,11 @@ Mock ERP 从 `fixtures/erp-spareparts-demo` 加载 30 个商品、12 个客户�
 | --- | --- | --- |
 | LangGraph | src/workflow.ts | extract → match → review；interrupt 暂停，SQLite checkpoint 保存状态；批准后进入 write，校验失败回审核 |
 | LangChain | src/model.ts 的 inventoryTool | 模型返回 get_inventory 参数；Zod 校验；工具调用 ERP 只读接口；未跟踪库存返回 null |
-| LangSmith | src/model.ts 的 RunTree | 显式记录模型输入输出与工具结果；不是默认自动记录整个 LangGraph |
+| LangSmith | `scripts/learn.ts` 的图追踪及 `src/model.ts` 的子 run / feedback | 查看一条根 trace 中的图节点、LLM、只读 Tool 和 interrupt；人工决定关联为 feedback |
 
 第二步在真实 ERP 下用 README 的 import/show/review 命令观察 pendingReview、issues、revision。先查看暂停状态，再手工处理冲突；decide approve 会写真实 ERP Draft。中断与跨进程恢复不需要先调用模型。
 
-第三步验证 Gemini 2.5 Flash-Lite 的真实工具调用和 LangSmith trace。用户已撤销两次 / $0.05 本地上限；历史失败记录保留。完整库存问答使用两次 Gemini 请求，遇到额度、限流或其他 API 错误停止，不自动重试或切换。免费额度由 Google 项目控制，账本不保证免费。仍须区分上传了失败 trace 与验证了成功工具轨迹。
+第三步验证 Gemini 2.5 Flash-Lite 的真实调用和 LangSmith trace。用户已撤销两次 / $0.05 本地上限；历史失败记录保留。询价流程使用一次抽取请求和一次回复请求，库存 Tool 本身不调用模型。遇到额度、限流或其他 API 错误停止，不自动重试或切换。免费额度由 Google 项目控制，账本不保证免费。成功的完整图与 Tool 轨迹已验证；模型准确率仍需人类提供的留出数据集评测。
 
 当前已实现上述本地练习 UI，复用现有图和人工审核校验；仅连接模拟 ERP。后续可在真实工具轨迹验证后展示对应 trace 链接，真实 ERP 审核仍使用正式 CLI。
 
