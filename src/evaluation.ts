@@ -11,12 +11,17 @@ const historical=z.union([normalizedExtraction,z.object({status:z.literal('error
 const expected=normalizedExtraction.omit({status:true,evidenceValid:true});
 const evaluationCase=z.object({id:z.string().min(1),inputs:z.object({sources:z.array(z.object({source:z.enum(['email','pdf']),page:z.number().int().nonnegative(),text:z.string().min(1)}).strict()).min(1)}).strict(),expected,historical}).strict();
 export const evaluationFixture=z.object({humanVerified:z.literal(true),verifiedBy:z.string().min(1),verificationDate:z.string().date(),cases:z.array(evaluationCase).min(1)}).strict();
+export const candidateFixture=z.object({humanVerified:z.literal(false),providedBy:z.string().min(1),providedDate:z.string().date(),
+  cases:z.array(evaluationCase.pick({id:true,inputs:true})).min(1)}).strict();
 export type EvaluationFixture=z.infer<typeof evaluationFixture>;
 export type ExpectedExtraction=z.infer<typeof expected>;
 export type NormalizedExtraction=z.infer<typeof normalizedExtraction>;
 
 export async function readEvaluationFixture(path:string) {
   return evaluationFixture.parse(JSON.parse(await readFile(path,'utf8')));
+}
+export async function readCandidateFixture(path:string) {
+  return candidateFixture.parse(JSON.parse(await readFile(path,'utf8')));
 }
 
 export function normalizeExtraction(value:Extraction):NormalizedExtraction {

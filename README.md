@@ -113,6 +113,15 @@ npm run eval:langsmith -- compare <baseline-experiment> <candidate-experiment>
 
 `demo` sends only the four committed fictional emails to Gemini and LangSmith, makes four model requests, records all attempts in `data/langsmith-evaluation-ledger/`, and never calls ERP. The strict dataset pass rate is intentionally allowed to be zero: evaluators expose disagreements instead of changing human labels to make a dashboard green. See [evaluation notes](docs/evaluation.md).
 
+New user-provided emails start in a separate input-only candidate dataset. This command runs one extraction per email and writes model-proposed labels for human review; it never promotes those labels to gold automatically:
+
+```powershell
+npm run eval:langsmith -- seed-candidates
+npm run eval:langsmith -- candidates
+```
+
+Review the ignored `data/english-candidate-review.json`. Its `humanVerified: false` marker must remain until a person checks every proposed value against the preserved source.
+
 ## Repository hygiene and project scope
 
 - `.env`, `.env.erp`, `data/`, local Miko state, dependency folders, ERP containers, logs, coverage, and temporary/backup files are ignored.

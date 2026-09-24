@@ -1,0 +1,57 @@
+{
+  "humanVerified": false,
+  "providedBy": "repository owner",
+  "providedDate": "2026-09-24",
+  "cases": [
+    {
+      "id": "apex-stock-check",
+      "inputs": {
+        "sources": [{
+          "source": "email",
+          "page": 0,
+          "text": "Subject: Quick stock check / Apex Smart Solutions\n\nHey team,\n\nDropped by your catalog and wanted to check if you have these items ready to ship out of your warehouse? Looking for a ballpark quote as well:\n\n- 50 units x OmniCharge Wireless Hub (Black)\n- 120 pcs - Lumina Desk LED Pro (Silver)\n- 30x Ergonomic Monitor Arm Single V2\n\nAre you experiencing any supply chain delays on these right now? If we lock this in, we'd need them delivered to our Austin hub by late November.\n\nAppreciate a quick reply!\n\nBest,\nSarah Jenkins\nPurchasing Lead | Apex Smart Solutions\n104 E 2nd St, Austin, TX 78701, USA\n[s.jenkins@apexsmart-tech.com](mailto:s.jenkins@apexsmart-tech.com) | +1 (512) 555-0192"
+        }]
+      }
+    },
+    {
+      "id": "nippon-po-2026-99482",
+      "inputs": {
+        "sources": [{
+          "source": "email",
+          "page": 0,
+          "text": "Subject: PURCHASE ORDER: PO-2026-99482 (Nippon Cybernetics Corp.)\n\nDear Sales Department,\n\nPlease find our formal request for procurement below. We require immediate confirmation regarding production capacity and strict adherence to the stated delivery deadline.\n\nOrder Details:\n\n1. Model: FX-9000 Control Board / Quantity: 15 Units\n2. Model: S-20 Sensor Assembly / Quantity: 200 Units\n3. Model: Heavy-Duty Servo Drive SD-x / Quantity: 8 Units\n\nAll items must pass your standard QA protocol before dispatch. Delivery is required at our Yokohama distribution facility no later than Friday, October 30, 2026. Please return the signed order acknowledgement within 24 hours.\n\nSincerely,\nKenji Tanaka\nDirector of Logistics\nNippon Cybernetics Corp.\nChuo City, Tokyo 104-0061, Japan\n[k-tanaka@nippon-cybernetics.co.jp](mailto:k-tanaka@nippon-cybernetics.co.jp)"
+        }]
+      }
+    },
+    {
+      "id": "berlin-revised-quote",
+      "inputs": {
+        "sources": [{
+          "source": "email",
+          "page": 0,
+          "text": "Subject: URGENT: Revised quote needed for Berlin Cafe Supplies\n\nHi Sales,\n\nFollowing up on our call. We need to finalize this order by tomorrow morning to hit our opening date. Can you update the pricing for the revised quantities below?\n\n- 6x AeroBrew Commercial Espresso Maker (3-Group)\n- 15 units - GrindMaster Pro 800\n- Barista Toolkit Type-A (Need 40 sets)\n\nCan your logistics partner guarantee delivery to our Berlin Mitte location by October 12? Any delay will ruin our launch schedule. Let me know asap.\n\nRegards,\nMarc Lehmann\nOperations\nBerlin Cafe Supplies GmbH\nFriedrichstraße 95, 10117 Berlin, Germany\n[m.lehmann@berlin-cafesupplies.de](mailto:m.lehmann@berlin-cafesupplies.de) | +49 30 8883 221"
+        }]
+      }
+    },
+    {
+      "id": "outback-stock",
+      "inputs": {
+        "sources": [{
+          "source": "email",
+          "page": 0,
+          "text": "Subject: stock? - Outback Builders\n\nHey,\n\nNeed a price and ETA on these materials to Sydney ASAP:\n\n- Timber Beam 4x4 (12ft) - 80 count\n- Galvanized Screws box of 1000 - 15 boxes\n- Weatherproof Sealant Eco-Guard - 50 tubs\n\nDo you have this stock on hand right now or is there a waiting list? Need it on-site by mid next month.\n\nCheers,\nDave\nOutback Builders Pty Ltd\nDave @ outbackbuilders.com.au"
+        }]
+      }
+    },
+    {
+      "id": "solarvolt-spec-approval",
+      "inputs": {
+        "sources": [{
+          "source": "email",
+          "page": 0,
+          "text": "Subject: Technical specification approval - SolarVolt Brazil\n\nPrezados,\n\nWe are reviewing the draft agreement for our Q4 infrastructure project. Our engineering team has approved your catalog specifications, provided you can supply the exact variations listed here:\n\n• Helios-450W Solar Panel (Mono-PERC) -> 500 Modules\n• Inverter SmartVolt 10KTL -> 12 Units\n• Aluminum Railing Mount Set (Heavy Wind Variant) -> 150 Kits\n\nPlease verify if the full batch can be shipped under a single Bill of Lading to Port of Santos. We intend to finalize the transaction once you confirm that custom clearance documentation will be prepared on your end.\n\nKind regards,\nCamila Ribeiro\nSenior Procurement Engineer\nSolarVolt Energia S.A.\nAv. Paulista, 1000, São Paulo, Brazil\n[c.ribeiro@solarvolt-energia.br](mailto:c.ribeiro@solarvolt-energia.br)"
+        }]
+      }
+    }
+  ]
+}

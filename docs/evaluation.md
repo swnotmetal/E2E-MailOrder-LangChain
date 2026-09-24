@@ -20,6 +20,12 @@ npm run eval:langsmith -- compare <baseline-experiment> <candidate-experiment>
 
 LangSmith 官方将这种离线 dataset + evaluator + experiment comparison 定义为 regression testing；比较视图用于查看相对 baseline 的改善与退化：https://docs.langchain.com/langsmith/evaluation-types 。
 
+### 未标注候选邮件
+
+新邮件不直接进入上述 gold dataset。`fixtures/evaluation/english-candidates.json` 只保存用户提供的虚构原文，并固定为 `humanVerified: false`。运行 `npm run eval:langsmith -- candidates` 会建立独立 input-only dataset、每封调用一次固定模型，并生成 `data/english-candidate-review.json`。该文件中的 `proposedExpected` 来自模型，包含 language、intent、customer、sender、location、PO、date、address，以及商品 description / quantity / unit；它不是 reference output，必须由人逐项核对后才能晋升。
+
+候选实验只有不依赖 gold 的结构 evaluator：调用完成、evidence grounding、语言字段存在、至少一个商品行。全部为 1 只证明数据管道和结构有效，不证明语义正确。实际人工检查仍要发现诸如公司漏提、混合语言误判、不同业务日期混在同一字段等问题。
+
 开发集在 fixtures/，10 对邮件/PDF，开发期预期在 design.md。预期由实现者草拟，尚未由用户核验，不是独立准确率证据。
 
 最终盲测：用户提供新邮件/PDF（不进入开发调试集），复制 gold-template.json 并填写每个 case 的 id、email、pdf、fields、issueCodes。
