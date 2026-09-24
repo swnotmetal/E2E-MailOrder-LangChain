@@ -14,6 +14,8 @@ import { inventoryTool, geminiInquiryReply, geminiMailExtractor, recordHumanRevi
 import { resolve } from 'node:path';
 
 export async function startLearningLab(port=3210) {
+  const traceProject=process.env.LEARN_LANGSMITH_PROJECT?.trim()||process.env.LANGSMITH_PROJECT?.trim()||'order-review-mailbox-ui';
+  process.env.LANGSMITH_PROJECT=traceProject;
   const configureTracing=()=>{
     const enabled=process.env.ORDER_TRACE==='true'&&!!process.env.LANGSMITH_API_KEY;
     process.env.LANGSMITH_TRACING=enabled?'true':'false';process.env.LANGCHAIN_TRACING_V2=enabled?'true':'false';
@@ -94,7 +96,7 @@ export async function startLearningLab(port=3210) {
           try {
             if(mail.mode==='gemini') {try{process.loadEnvFile('.env');}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}configureTracing();}
             for await(const event of await (mail.mode==='gemini'?modelGraph:graph).stream({sources},{configurable:{thread_id:id},streamMode:'updates',
-              tags:['fictional-email','learning-lab'],metadata:{thread_id:id,subject:mail.subject}})) events.push(event);
+              runName:`mailbox · ${mail.subject}`,tags:['fictional-email','learning-lab','source:web-ui'],metadata:{thread_id:id,subject:mail.subject,sourceSystem:'web-ui'}})) events.push(event);
           } catch(error) {mailbox.get(id)!.error=error instanceof Error?error.message:'Unknown error';}
         } else if(req.url==='/api/start') {
           const {fixture}=z.object({fixture:z.enum(['01-clean','02-ambiguous','03-quantity-conflict'])}).parse(input);
@@ -102,7 +104,7 @@ export async function startLearningLab(port=3210) {
           id=randomUUID();threads.add(id);
           const sources=await readSources(`fixtures/${fixture}.eml`,`fixtures/${fixture}.pdf`);
           for await(const event of await graph.stream({sources},{configurable:{thread_id:id},streamMode:'updates',
-            tags:['fictional-email','learning-lab','template'],metadata:{thread_id:id,fixture}})) events.push(event);
+            runName:`fixture · ${fixture}`,tags:['fictional-email','learning-lab','template','source:web-ui'],metadata:{thread_id:id,fixture,sourceSystem:'web-ui'}})) events.push(event);
         } else {
           id=z.string().uuid().parse(input.id);if(!threads.has(id)) throw Error('UNKNOWN_SESSION');
           if(req.url==='/api/decide') {
@@ -112,7 +114,7 @@ export async function startLearningLab(port=3210) {
             const decision=(pending.kind==='inquiry'?InquiryDecisionSchema:DecisionSchema).parse(input.decision);
             humanDecision=decision;
             for await(const event of await graph.stream(new Command({resume:decision}),{configurable:{thread_id:id},streamMode:'updates',
-              tags:['fictional-email','learning-lab','human-review'],metadata:{thread_id:id,subject:mailbox.get(id)?.subject??''}})) events.push(event);
+              runName:`mailbox review · ${mailbox.get(id)?.subject??id}`,tags:['fictional-email','learning-lab','human-review','source:web-ui'],metadata:{thread_id:id,subject:mailbox.get(id)?.subject??'',sourceSystem:'web-ui'}})) events.push(event);
           }
         }
         const state=await graph.getState({configurable:{thread_id:id}});
@@ -125,7 +127,7 @@ export async function startLearningLab(port=3210) {
         }
         const mail=mailbox.get(id);
         if(mail && mail.events!==events) mail.events.push(...events);
-        res.end(JSON.stringify({id,error:mail?.error,feedback,mode:'Mock ERP / real LangGraph / optional Gemini',events:mail?.events??events,values:state.values,next:state.next,
+        res.end(JSON.stringify({id,error:mail?.error,feedback,mode:'Mock ERP / real LangGraph / optional Gemini',tracing:process.env.LANGSMITH_TRACING==='true',traceProject,events:mail?.events??events,values:state.values,next:state.next,
           pending:state.tasks.flatMap(t=>t.interrupts.map(i=>i.value)),mockWrites:await mockWrites()}));
       } finally {busy=false;}
     } catch(error) {res.writeHead(400).end(JSON.stringify({error:error instanceof Error?error.message:'Unknown error'}));}
@@ -135,6 +137,7 @@ export async function startLearningLab(port=3210) {
     close:async()=>{await new Promise<void>(r=>server.close(()=>r()));saver.db.close();if(ownedMock) await ownedMock.close();}};
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
+  try {process.loadEnvFile('.env');} catch(error) {if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
   const lab=await startLearningLab();console.log(`Learning lab: ${lab.url} (${process.env.LEARN_ERP_BASE_URL?'external':'embedded'} mock ERP; optional live Gemini; restart clears practice state)`);
   process.once('SIGINT',()=>{void lab.close();});
 }
