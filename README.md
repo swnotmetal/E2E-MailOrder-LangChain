@@ -96,6 +96,23 @@ For the intended placement between enterprise email and ERP systems, failure bou
 
 Set `GOOGLE_API_KEY` and `ORDER_EXTRACTOR=gemini` to enable live extraction. Set `ORDER_TRACE=true` only when you intend to send fictional inputs to LangSmith. Every attempted request, including failures, is written to the local ignored ledger. The application stops on quota, rate-limit, or other API errors; it does not retry automatically or switch providers.
 
+## LangSmith regression lab
+
+The committed human-confirmed dataset contains four fictional inquiry emails in English, German, Estonian, and Finnish. Synchronizing it is idempotent:
+
+```powershell
+npm run eval:langsmith -- seed
+```
+
+The demo creates a no-model historical baseline, runs the current grounded extractor once per example with the fixed Gemini model, applies deterministic per-example and summary evaluators, and creates a LangSmith version comparison:
+
+```powershell
+npm run eval:langsmith -- demo
+npm run eval:langsmith -- compare <baseline-experiment> <candidate-experiment>
+```
+
+`demo` sends only the four committed fictional emails to Gemini and LangSmith, makes four model requests, records all attempts in `data/langsmith-evaluation-ledger/`, and never calls ERP. The strict dataset pass rate is intentionally allowed to be zero: evaluators expose disagreements instead of changing human labels to make a dashboard green. See [evaluation notes](docs/evaluation.md).
+
 ## Repository hygiene and project scope
 
 - `.env`, `.env.erp`, `data/`, local Miko state, dependency folders, ERP containers, logs, coverage, and temporary/backup files are ignored.

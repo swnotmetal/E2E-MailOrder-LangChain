@@ -14,7 +14,8 @@
     "cli": "tsx src/cli.ts",
     "fixtures": "tsx scripts/fixtures.ts",
     "demo": "tsx scripts/demo.ts",
-    "evaluate": "tsx scripts/evaluate.ts"
+    "evaluate": "tsx scripts/evaluate.ts",
+    "eval:langsmith": "tsx scripts/langsmith-evaluation.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.2.12",

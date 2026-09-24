@@ -1,0 +1,131 @@
+{
+  "humanVerified": true,
+  "verifiedBy": "repository owner via requested multilingual regression dataset",
+  "verificationDate": "2026-09-24",
+  "cases": [
+    {
+      "id": "tallinna-en",
+      "inputs": {
+        "sources": [
+          {
+            "source": "email",
+            "page": 0,
+            "text": "TALLINNA KLIIMATEHNIKA OÜ\nNarva mnt 7, 10117 Tallinn, Estonia\nEmail: info@tallinna-kliima.ee | Tel: +372 612 3456\n\nToomas Tamm, Procurement Manager\nTallinna Kliimatehnika OÜ\n\nHello,\n\nWe are looking for a non-binding price quote and availability information. We are interested in these products:\n\n* 10x Filter A20\n* 12x Radiaatori ventiil H-4\n* 15x Smart Thermostat V1\n* 5x Thermostat X-200\n* 8x Õhufilter Carbon-X\n* 20x Filter\n\nAre there any expected supply shortages? Please let us know if you can fully deliver the goods. We need the items by October 15, 2026, at the latest. Our main warehouse is located in Berlin.\n\nThanks in advance for a quick response!\n\nBest regards,\nToomas Tamm"
+          }
+        ]
+      },
+      "expected": {
+        "language": "en",
+        "intent": "inquiry",
+        "customer": ["TALLINNA KLIIMATEHNIKA OÜ"],
+        "sender": ["Toomas Tamm"],
+        "date": ["October 15, 2026"],
+        "lines": [
+          {"description": "Filter A20", "quantity": "10"},
+          {"description": "Radiaatori ventiil H-4", "quantity": "12"},
+          {"description": "Smart Thermostat V1", "quantity": "15"},
+          {"description": "Thermostat X-200", "quantity": "5"},
+          {"description": "Õhufilter Carbon-X", "quantity": "8"},
+          {"description": "Filter", "quantity": "20"}
+        ]
+      },
+      "historical": {"status": "error", "error": "MODEL_QUOTE_NOT_UNIQUE"}
+    },
+    {
+      "id": "weber-de",
+      "inputs": {
+        "sources": [
+          {
+            "source": "email",
+            "page": 0,
+            "text": "Sehr geehrte Damen und Herren,\n\nwir sind an einigen Ihrer Produkte interessiert und bitten um ein unverbindliches Angebot. Bitte teilen Sie uns auch die aktuellen Preise und die Verfügbarkeit für die folgenden Artikel mit:\n\n15x Smart Thermostat V1\n\n10x Filter A20\n\n5x Thermostat X-200\n\n20x Filter\n\nWir benötigen die Lieferung der genannten Waren bis spätestens 15. Oktober 2026 an unser Hauptlager in Berlin.\n\nBitte lassen Sie uns wissen, ob Sie diese Artikel zu dem gewünschten Datum vollständig liefern können oder ob mit Lieferengpässen zu rechnen ist.\n\nVielen Dank im Voraus für Ihre rasche Rückmeldung.\n\nMit freundlichen Grüßen\n\nLukas Weber\nEinkaufsleiter\nWeber Gebäudetechnik GmbH"
+          }
+        ]
+      },
+      "expected": {
+        "language": "de",
+        "intent": "inquiry",
+        "customer": ["Weber Gebäudetechnik GmbH"],
+        "sender": ["Lukas Weber"],
+        "date": ["15. Oktober 2026"],
+        "lines": [
+          {"description": "Smart Thermostat V1", "quantity": "15"},
+          {"description": "Filter A20", "quantity": "10"},
+          {"description": "Thermostat X-200", "quantity": "5"},
+          {"description": "Filter", "quantity": "20"}
+        ]
+      },
+      "historical": {"status": "error", "error": "MODEL_QUOTE_NOT_UNIQUE"}
+    },
+    {
+      "id": "tallinna-et",
+      "inputs": {
+        "sources": [
+          {
+            "source": "email",
+            "page": 0,
+            "text": "TALLINNA KLIIMATEHNIKA OÜ\nNarva mnt 7, 10117 Tallinn, Eesti\nE-post: info@tallinna-kliima.ee | Tel: +372 612 3456\n\nHankejuht Toomas Tamm\nTallinna Kliimatehnika OÜ\n\nTervist!\n\nSoovime hinnapakkumist (mittepühendavat) ja infot kättesaadavuse kohta. Oleme huvitatud nendest toodetest:\n\n* 10x Filter A20\n* 12x Radiaatori ventiil H-4\n* 15x Smart Thermostat V1\n* 5x Thermostat X-200\n* 8x Õhufilter Carbon-X\n* 20x Filter\n\nKas on oodata tarneraskusi? Palun andke teada, kas saate kauba täielikult kohale toimetada. Vajame asju hiljemalt 15. oktoobriks 2026. Meie pealadu asub Berliinis.\n\nTänud ette kiire vastuse eest!\n\nLugupidamisega,\nToomas Tamm"
+          }
+        ]
+      },
+      "expected": {
+        "language": "et",
+        "intent": "inquiry",
+        "customer": ["TALLINNA KLIIMATEHNIKA OÜ"],
+        "sender": ["Toomas Tamm"],
+        "date": ["15. oktoobriks 2026"],
+        "lines": [
+          {"description": "Filter A20", "quantity": "10"},
+          {"description": "Radiaatori ventiil H-4", "quantity": "12"},
+          {"description": "Smart Thermostat V1", "quantity": "15"},
+          {"description": "Thermostat X-200", "quantity": "5"},
+          {"description": "Õhufilter Carbon-X", "quantity": "8"},
+          {"description": "Filter", "quantity": "20"}
+        ]
+      },
+      "historical": {"status": "error", "error": "MODEL_QUOTE_NOT_UNIQUE"}
+    },
+    {
+      "id": "helsinki-fi",
+      "inputs": {
+        "sources": [
+          {
+            "source": "email",
+            "page": 0,
+            "text": "HELSINGIN ILMASTPOINTI OY\nMannerheimintie 12 B, 00100 Helsinki, Suomi\nSähköposti: tilaukset@helsingin-ilmastointi.fi | Puh: +358 9 87654321 \n\nMatti Virtanen / Hankintapäällikkö\nHelsingin Ilmastointi Oy \n\nMoi! \n\nKysyisin nopeasti saatavuutta ja sitomatonta tarjousta näille tuotteille: \n\n* Kpl: 25 -> Aktiivihiilisuodatin AC-100\n* 12x Älytermostaatti Pro v3\n* IV-Koneen suodatinsetti (M5/F7) - Tarve: 40 kpl\n* 8 kappaletta / Radiaattoritermostaatti Eco-X\n* Korvausilmaventtiili KVL-125 : 15kpl\n\nOnnistuuko toimitus kokonaisuudessaan ilman toimitusvaikeuksia? Kamat pitäisi saada Berliinin päävarastollemme viimeistään 15. lokakuuta 2026. \n\nYstävällisin terveisin,\nMatti Virtanen\np.s. Laittaisitteko vastauksen mahdollisimman pian tulemaan, kiitos!"
+          }
+        ]
+      },
+      "expected": {
+        "language": "fi",
+        "intent": "inquiry",
+        "customer": ["HELSINGIN ILMASTPOINTI OY", "Helsingin Ilmastointi Oy"],
+        "sender": ["Matti Virtanen"],
+        "date": ["15. lokakuuta 2026"],
+        "lines": [
+          {"description": "Aktiivihiilisuodatin AC-100", "quantity": "25"},
+          {"description": "Älytermostaatti Pro v3", "quantity": "12"},
+          {"description": "IV-Koneen suodatinsetti (M5/F7)", "quantity": "40"},
+          {"description": "Radiaattoritermostaatti Eco-X", "quantity": "8"},
+          {"description": "Korvausilmaventtiili KVL-125", "quantity": "15"}
+        ]
+      },
+      "historical": {
+        "status": "ok",
+        "language": "fi",
+        "intent": "conditional",
+        "customer": ["HELSINGIN ILMASTPOINTI OY", "Helsingin Ilmastointi Oy"],
+        "sender": ["Matti Virtanen"],
+        "date": ["15. lokakuuta 2026"],
+        "lines": [
+          {"description": "Aktiivihiilisuodatin AC-100", "quantity": "25"},
+          {"description": "Älytermostaatti Pro v3", "quantity": "12"},
+          {"description": "IV-Koneen suodatinsetti (M5/F7)", "quantity": "40"},
+          {"description": "Radiaattoritermostaatti Eco-X", "quantity": "8"},
+          {"description": "Korvausilmaventtiili KVL-125", "quantity": "15"}
+        ],
+        "evidenceValid": true
+      }
+    }
+  ]
+}

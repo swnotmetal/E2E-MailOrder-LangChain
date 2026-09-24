@@ -1,5 +1,13 @@
 > 2026-09-22 当前约束：所有后续模型调用严格只用 Gemini 2.5 Flash-Lite（`gemini-2.5-flash-lite`），使用 GOOGLE_API_KEY / ORDER_EXTRACTOR=gemini。下文旧供应商记录仅为历史，不构成继续调用的授权。用户已于 2026-09-22 撤销两次 / $0.05 本地限制，保留历史账本；额度或限流错误停止，不自动重试或切换。下文预算限制仅为历史记录；已发生一次旧供应商 401 请求。
 
+## 2026-09-24 LangSmith Dataset / Experiment
+
+- 真实创建 dataset `fictional-multilingual-inquiry-regression`（ID `9a917738-ca59-429a-98aa-19a4b516d9c7`），包含用户提供的英、德、爱沙尼亚、芬兰四封虚构邮件。重复同步最终验证为 created 0 / updated 0 / unchanged 4。
+- 历史实验：`mail-understanding-historical-2026-09-23-f8a76a61`。当前实验：`mail-understanding-current-b3d84f6a`。当前实验调用固定 Gemini 四次，全部完成；专用 ledger 为 attempts 4 / completed 4，估算合计 USD 0.001855。
+- 当前四个根 run 均有 `fictional-mail-understanding` LLM 子 span，无 ERP 调用或写入。英、德、爱三例从历史 quote 错误提升为六项基础 evaluator 通过；四例仍全部与人工 `inquiry` 意图标签不一致。芬兰语当前还遗漏第二种公司写法。
+- 修正后的四行版本比较为 `mail-understanding-version-comparison-45d1`。严格 dataset pass rate 为 0；它诚实表示没有任何一例通过全部字段，而不是模型或 LangSmith 运行失败。
+- 本地 TypeScript 检查通过；新增 fixture/evaluator 后全量 mock 回归 35/35。四例不能证明生产准确率、跨语言泛化或业务价值。
+
 ## 2026-09-23 完整 LangGraph trace 与人工反馈
 
 - 使用虚构英文询价真实运行固定模型；根 trace `01a0cf70-9d51-7099-9196-a321f7f06f3f` 包含 `extract`、`prepareInquiry`、`draftInquiryReply` 和 `inquiryReview` 图节点。
