@@ -22,7 +22,7 @@ const normalizeCandidateExtraction=(value:Extraction)=>({...normalizeExtraction(
 async function seed(c:Client) {
   const fixture=await readEvaluationFixture(FIXTURE);
   const dataset=await c.hasDataset({datasetName:DATASET})?await c.readDataset({datasetName:DATASET}):await c.createDataset(DATASET,{
-    description:'Four fictional multilingual inquiry emails explicitly requested as a human-confirmed regression set. No ERP writes.',
+    description:'Human-confirmed fictional email extraction regression set. No ERP writes.',
     dataType:'kv',metadata:{humanVerified:true,verifiedBy:fixture.verifiedBy,verificationDate:fixture.verificationDate,modelPolicy:MODEL_ID}
   });
   const existing=new Map<string,any>();
@@ -30,7 +30,8 @@ async function seed(c:Client) {
   let created=0,updated=0,unchanged=0;
   for(const item of fixture.cases) {
     const upload={inputs:{caseId:item.id,sources:item.inputs.sources},outputs:item.expected,
-      metadata:{caseId:item.id,humanVerified:true,verifiedBy:fixture.verifiedBy,verificationDate:fixture.verificationDate},split:'regression'};
+      metadata:{caseId:item.id,humanVerified:true,verifiedBy:fixture.verifiedBy,verificationDate:fixture.verificationDate,hasHistorical:Boolean(item.historical)},
+      split:item.historical?['regression','historical-comparison']:['regression']};
     const old=existing.get(item.id);
     if(!old){await c.createExample({...upload,dataset_id:dataset.id});created++;continue;}
     const managedMetadata=Object.fromEntries(Object.keys(upload.metadata).map(key=>[key,old.metadata?.[key]]));
@@ -67,7 +68,8 @@ const summary=({outputs,referenceOutputs}:{outputs:Record<string,unknown>[];refe
   return {key:'dataset_pass_rate',score:rows.length?rows.reduce((sum,row)=>sum+row.regression_pass,0)/rows.length:0};
 };
 async function consume(result:any):Promise<{experimentName:string;rows:any[];summary:any}> {
-  const rows=(result.results??[]).map((row:any)=>({exampleId:row.example.id,runId:row.run.id,error:row.run.error??null,
+  const rows=(result.results??[]).map((row:any)=>({caseId:String(row.run.inputs?.caseId??''),exampleId:row.example.id,runId:row.run.id,
+    output:row.run.outputs??null,error:row.run.error??null,
     scores:row.evaluationResults.results.map((score:any)=>({key:score.key,score:score.score}))}));
   return {experimentName:(result as any).experimentName,rows,summary:(result as any).summaryResults};
 }
@@ -85,18 +87,32 @@ async function compare(c:Client,baseline:string,candidate:string,fixture:Awaited
 async function runDemo(c:Client) {
   const fixture=await readEvaluationFixture(FIXTURE);const byId=new Map(fixture.cases.map(item=>[item.id,item]));
   await seed(c);
-  const common={data:DATASET,evaluators:[evaluator],summaryEvaluators:[summary],client:c,maxConcurrency:1,
+  const common={evaluators:[evaluator],summaryEvaluators:[summary],client:c,maxConcurrency:1,
     metadata:{dataset:DATASET,humanVerified:true,fixedModel:MODEL_ID},description:'Fictional multilingual email extraction regression; no ERP writes.'};
   const baseline=await consume(await evaluate(async(input:any)=>byId.get(input.caseId)?.historical??{status:'error',error:'HISTORICAL_CASE_NOT_FOUND'},
-    {...common,experimentPrefix:'mail-understanding-historical-2026-09-23'}));
+    {...common,data:c.listExamples({datasetName:DATASET,splits:['historical-comparison']}),experimentPrefix:'mail-understanding-historical-2026-09-23'}));
   process.env.ORDER_TRACE='true';process.env.LANGSMITH_TRACING='true';process.env.LANGCHAIN_TRACING_V2='true';
   const extract=geminiMailExtractor('data/langsmith-evaluation-ledger');
   const candidate=await consume(await evaluate(async(input:any)=>{assertSourcesAreFictional(input.sources);return normalizeExtraction(await extract(input.sources));},
-    {...common,experimentPrefix:'mail-understanding-current',metadata:{...common.metadata,variant:'current-grounded-extractor'}}));
+    {...common,data:c.listExamples({datasetName:DATASET,splits:['historical-comparison']}),experimentPrefix:'mail-understanding-current',metadata:{...common.metadata,variant:'current-grounded-extractor'}}));
   const comparison=await compare(c,baseline.experimentName,candidate.experimentName,fixture);
   const report={kind:'LangSmith dataset and experiments; fictional data; no ERP writes',dataset:DATASET,baseline,candidate,
     comparison:{experimentName:comparison.experimentName,url:comparison.url,rows:comparison.results.length},model:MODEL_ID};
   await mkdir('data',{recursive:true});await writeFile('data/langsmith-evaluation.json',JSON.stringify(report,null,2));
+  console.log(JSON.stringify(report,null,2));
+}
+
+async function runCurrent(c:Client) {
+  const seeded=await seed(c);
+  process.env.ORDER_TRACE='true';process.env.LANGSMITH_TRACING='true';process.env.LANGCHAIN_TRACING_V2='true';
+  const extract=geminiMailExtractor('data/langsmith-evaluation-ledger');
+  const result=await consume(await evaluate(async(input:any)=>{assertSourcesAreFictional(input.sources);return normalizeExtraction(await extract(input.sources));},{
+    data:DATASET,evaluators:[evaluator],summaryEvaluators:[summary],client:c,maxConcurrency:1,experimentPrefix:'mail-understanding-current-gold',
+    metadata:{dataset:DATASET,humanVerified:true,fixedModel:MODEL_ID,caseCount:seeded.cases},
+    description:'Current fixed-model extraction against all human-confirmed fictional gold examples; no ERP writes.'
+  }));
+  const report={kind:'Current extraction against human-confirmed fictional gold; no ERP writes',dataset:DATASET,seeded,result,model:MODEL_ID};
+  await mkdir('data',{recursive:true});await writeFile('data/langsmith-current-gold.json',JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));
 }
 
@@ -129,10 +145,11 @@ if(!process.env.LANGSMITH_API_KEY)throw Error('LANGSMITH_API_KEY required');
 const command=process.argv[2]??'demo';
 if(command==='seed')console.log(JSON.stringify(await seed(client()),null,2));
 else if(command==='demo'){if(!process.env.GOOGLE_API_KEY)throw Error('GOOGLE_API_KEY required for current experiment');await runDemo(client());}
+else if(command==='current'){if(!process.env.GOOGLE_API_KEY)throw Error('GOOGLE_API_KEY required for current experiment');await runCurrent(client());}
 else if(command==='seed-candidates')console.log(JSON.stringify(await seedCandidates(client()),null,2));
 else if(command==='candidates'){if(!process.env.GOOGLE_API_KEY)throw Error('GOOGLE_API_KEY required for candidate experiment');await runCandidates(client());}
 else if(command==='compare'){
   const baseline=process.argv[3],candidate=process.argv[4];if(!baseline||!candidate)throw Error('compare requires baseline and candidate experiment names');
   const result=await compare(client(),baseline,candidate,await readEvaluationFixture(FIXTURE));
   console.log(JSON.stringify({experimentName:result.experimentName,url:result.url,rows:result.results.length},null,2));
-} else throw Error('Usage: npm run eval:langsmith -- seed|demo|seed-candidates|candidates|compare <baseline> <candidate>');
+} else throw Error('Usage: npm run eval:langsmith -- seed|current|demo|seed-candidates|candidates|compare <baseline> <candidate>');

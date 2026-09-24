@@ -2,17 +2,18 @@
 
 ## LangSmith 多语言回归集（2026-09-24）
 
-`fixtures/evaluation/multilingual-inquiries.json` 保存用户此前提供并在 2026-09-24 明确要求组成数据集的四封虚构邮件：英语、德语、爱沙尼亚语和芬兰语。reference outputs 只覆盖可由原文人工核对的语言、意图、公司、发件人、日期、商品描述和数量；不包含 ERP 匹配、价格、库存或回复文案。原文与 reference outputs 一同提交，metadata 明确记录 `humanVerified`、核验来源与日期。
+`fixtures/evaluation/multilingual-inquiries.json` 保存 9 封经用户确认的虚构邮件：原有英、德、爱沙尼亚、芬兰四例，加上 2026-09-24 确认的五封英文候选。这里的 gold / reference output 是“人已同意、供 evaluator 判分的预期答案”，不是模型生成答案，也不宣称它是脱离当前任务定义的绝对真理。reference outputs 覆盖可由原文人工核对的语言、意图、公司、发件人、日期、商品描述和数量；新五例还明确标注 PO 与可用于 ERP 的送货地址。它不包含 ERP 匹配、价格、库存或回复文案。
 
 运行方式：
 
 ```powershell
 npm run eval:langsmith -- seed
+npm run eval:langsmith -- current
 npm run eval:langsmith -- demo
 npm run eval:langsmith -- compare <baseline-experiment> <candidate-experiment>
 ```
 
-`seed` 幂等创建或更新 LangSmith dataset。`demo` 先把 2026-09-23 已观察到的历史结果作为无模型 baseline，再让当前 `geminiMailExtractor` 对每个样例调用一次固定的 `gemini-2.5-flash-lite`。没有并发、自动重试或 provider fallback。它运行七个确定性字段 evaluator、一个严格 `regression_pass`，以及 dataset-level pass-rate summary evaluator；最后建立 pairwise version comparison。所有输入都是虚构数据，整个评测不初始化 ERP、更不写 ERP。
+`seed` 幂等创建或更新 LangSmith dataset。`current` 对全部 9 条 gold 各运行一次固定的 `gemini-2.5-flash-lite`。`demo` 只对确实保存了旧结果的四例做历史版本比较，不把新邮件伪造成旧版证据。没有并发、自动重试或 provider fallback。评估运行确定性字段 evaluator、严格 `regression_pass` 和 dataset-level pass-rate summary evaluator。所有输入都是虚构数据，整个评测不初始化 ERP、更不写 ERP。
 
 历史 baseline 不是重新模拟旧代码：英语、德语和爱沙尼亚语的 `MODEL_QUOTE_NOT_UNIQUE`，以及芬兰语的已保存结构化结果，均来自用户实际观察或保存的旧 trace。它用于展示版本差异，不用于证明生产准确率。当前四例同样只是小型人工回归集，不是统计显著的盲测。
 
@@ -20,9 +21,9 @@ npm run eval:langsmith -- compare <baseline-experiment> <candidate-experiment>
 
 LangSmith 官方将这种离线 dataset + evaluator + experiment comparison 定义为 regression testing；比较视图用于查看相对 baseline 的改善与退化：https://docs.langchain.com/langsmith/evaluation-types 。
 
-### 未标注候选邮件
+### 候选邮件与晋升
 
-新邮件不直接进入上述 gold dataset。`fixtures/evaluation/english-candidates.json` 只保存用户提供的虚构原文，并固定为 `humanVerified: false`。运行 `npm run eval:langsmith -- candidates` 会建立独立 input-only dataset、每封调用一次固定模型，并生成 `data/english-candidate-review.json`。该文件中的 `proposedExpected` 来自模型，包含 language、intent、customer、sender、location、PO、date、address，以及商品 description / quantity / unit；它不是 reference output，必须由人逐项核对后才能晋升。
+新邮件先进入 `fixtures/evaluation/english-candidates.json` 这个 `humanVerified: false` 的 input-only staging 集。运行 `npm run eval:langsmith -- candidates` 会生成模型建议，建议本身不能成为 gold。用户于 2026-09-24 确认人工复核判断后，这五例才被复制进 gold fixture；原 candidate fixture 留作晋升过程的证据，后续新邮件仍重复同一流程。
 
 候选实验只有不依赖 gold 的结构 evaluator：调用完成、evidence grounding、语言字段存在、至少一个商品行。全部为 1 只证明数据管道和结构有效，不证明语义正确。实际人工检查仍要发现诸如公司漏提、混合语言误判、不同业务日期混在同一字段等问题。
 

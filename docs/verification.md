@@ -2,19 +2,21 @@
 
 ## 2026-09-24 LangSmith Dataset / Experiment
 
-- 真实创建 dataset `fictional-multilingual-inquiry-regression`（ID `9a917738-ca59-429a-98aa-19a4b516d9c7`），包含用户提供的英、德、爱沙尼亚、芬兰四封虚构邮件。重复同步最终验证为 created 0 / updated 0 / unchanged 4。
+- 最初真实创建 dataset `fictional-multilingual-inquiry-regression`（ID `9a917738-ca59-429a-98aa-19a4b516d9c7`），包含用户提供的英、德、爱沙尼亚、芬兰四封虚构邮件；其后已扩充为下述 9 条 gold。
 - 历史实验：`mail-understanding-historical-2026-09-23-f8a76a61`。当前实验：`mail-understanding-current-b3d84f6a`。当前实验调用固定 Gemini 四次，全部完成；专用 ledger 为 attempts 4 / completed 4，估算合计 USD 0.001855。
 - 当前四个根 run 均有 `fictional-mail-understanding` LLM 子 span，无 ERP 调用或写入。英、德、爱三例从历史 quote 错误提升为六项基础 evaluator 通过；四例仍全部与人工 `inquiry` 意图标签不一致。芬兰语当前还遗漏第二种公司写法。
 - 修正后的四行版本比较为 `mail-understanding-version-comparison-45d1`。严格 dataset pass rate 为 0；它诚实表示没有任何一例通过全部字段，而不是模型或 LangSmith 运行失败。
-- 本地 TypeScript 检查通过；新增 fixture/evaluator 后全量 mock 回归 35/35。四例不能证明生产准确率、跨语言泛化或业务价值。
+- 当时本地 TypeScript 检查通过，mock 回归 35/35；本轮扩充后为 36/36。四例历史比较不能证明生产准确率、跨语言泛化或业务价值。
 
 ### 五封英文候选邮件
 
 - 用户新增的五封虚构邮件已保存为 input-only dataset `fictional-english-inbox-candidates`（ID `450fd81b-95f1-4a0b-ab41-651d6ae1be58`）；重复同步验证为 created 0 / updated 0 / unchanged 5。
 - 首轮 experiment `english-inbox-candidates-current-826e3415` 调用固定 Gemini 五次，全部完成；专用 ledger 为 attempts 5 / completed 5，估算合计 USD 0.001808。四个无 gold 结构 evaluator 均为 1，不能当准确率。
-- 待人工确认的实际信号包括：Outback Builders Pty Ltd 公司漏提；以葡萄牙语称呼开头但主体为英语的 SolarVolt 邮件被标为 `pt`；Berlin 邮件把“明早定稿”和“10 月 12 日交付”同时放入 date。模型建议保存在忽略的 `data/english-candidate-review.json`，未晋升为 gold。
+- 用户已于 2026-09-24 明确确认人工判断，五例已晋升到提交的 gold fixture。确认项包括：Outback Builders Pty Ltd 公司名；SolarVolt 主体语言为英语；Berlin 的送货日期只取 `October 12`；签名档公司地址不是明确送货地址；Apex/Outback 的相对交期应保留；Nippon 的 PO 应保留，但仅有 `Yokohama distribution facility` 不足以作为 ERP 邮寄地址。
 - 首轮根输出没有携带 PO、location、address 和 unit，因此新增 full-v1 输出 schema，并明确作为第二个实验 `english-inbox-candidates-full-v1-01e3d0db` 运行，而非把第一次结果覆盖或伪装成重试。两轮累计 attempts 10 / completed 10，估算合计 USD 0.003616。
-- full-v1 还显示 Apex、Berlin 和 SolarVolt 的签名档地址被误作明确送货地址；Apex 漏掉 `late November` 且 `30x` 没有单位；Nippon 的 PO 与三条行项目正确抽出，但 `Yokohama distribution facility` 不是完整邮寄地址。以上为人工检查候选，不是已确认 gold。
+- full-v1 还显示 Apex、Berlin 和 SolarVolt 的签名档地址被误作明确送货地址；Apex 漏掉 `late November` 且 `30x` 没有单位；Nippon 的 PO 与三条行项目正确抽出，但 `Yokohama distribution facility` 不是完整邮寄地址。这些判断现已由用户确认。
+- gold dataset 同步后为 9 例（created 5 / updated 4；再次同步 unchanged 9）。真实当前实验 `mail-understanding-current-gold-25d27331` 串行调用固定 Gemini 9 次，均成功；专用 ledger 累计 attempts 13 / completed 13 / USD 0.005518，因此本轮增量为 9 次 / USD 0.003663。实验链接：https://eu.smith.langchain.com/o/4e76dc7c-1bab-4f96-a8cb-f2fbbc33d2bd/datasets/9a917738-ca59-429a-98aa-19a4b516d9c7/compare?selectedSessions=eceb57a6-15d4-49a6-b8eb-eb5fc0b03ef7 。
+- 新五例的商品行与意图全部匹配。失败集中为：SolarVolt `language` 与签名地址；Outback 公司和相对日期；Berlin 多提“明早定稿”且误取签名地址；Nippon 把不完整设施名当送货地址；Apex 漏交期且误取签名地址。严格整例 pass rate 为 0，但不表示所有字段均错；它表示每封至少有一个严格字段不匹配。
 
 ## 2026-09-23 完整 LangGraph trace 与人工反馈
 

@@ -98,10 +98,11 @@ Set `GOOGLE_API_KEY` and `ORDER_EXTRACTOR=gemini` to enable live extraction. Set
 
 ## LangSmith regression lab
 
-The committed human-confirmed dataset contains four fictional inquiry emails in English, German, Estonian, and Finnish. Synchronizing it is idempotent:
+The committed human-confirmed gold dataset contains nine fictional emails: four multilingual regression cases plus five English inbox cases confirmed by the repository owner. "Gold" means the agreed human reference output used for scoring; it is not a model prediction or a claim of universal truth. Synchronizing it is idempotent:
 
 ```powershell
 npm run eval:langsmith -- seed
+npm run eval:langsmith -- current
 ```
 
 The demo creates a no-model historical baseline, runs the current grounded extractor once per example with the fixed Gemini model, applies deterministic per-example and summary evaluators, and creates a LangSmith version comparison:
@@ -111,16 +112,16 @@ npm run eval:langsmith -- demo
 npm run eval:langsmith -- compare <baseline-experiment> <candidate-experiment>
 ```
 
-`demo` sends only the four committed fictional emails to Gemini and LangSmith, makes four model requests, records all attempts in `data/langsmith-evaluation-ledger/`, and never calls ERP. The strict dataset pass rate is intentionally allowed to be zero: evaluators expose disagreements instead of changing human labels to make a dashboard green. See [evaluation notes](docs/evaluation.md).
+`current` evaluates all nine gold cases once. `demo` keeps the historical comparison restricted to the four cases that actually have saved historical evidence. Both record all attempts in `data/langsmith-evaluation-ledger/` and never call ERP. The strict dataset pass rate is intentionally allowed to be zero: evaluators expose disagreements instead of changing human labels to make a dashboard green. See [evaluation notes](docs/evaluation.md).
 
-New user-provided emails start in a separate input-only candidate dataset. This command runs one extraction per email and writes model-proposed labels for human review; it never promotes those labels to gold automatically:
+Future user-provided emails start in a separate input-only candidate dataset. This command runs one extraction per email and writes model-proposed labels for human review; it never promotes those labels to gold automatically:
 
 ```powershell
 npm run eval:langsmith -- seed-candidates
 npm run eval:langsmith -- candidates
 ```
 
-Review the ignored `data/english-candidate-review.json`. Its `humanVerified: false` marker must remain until a person checks every proposed value against the preserved source.
+Review the ignored `data/english-candidate-review.json`. Its `humanVerified: false` marker must remain until a person checks every proposed value against the preserved source. The five 2026-09-24 candidates have now been checked by the repository owner and copied into the committed gold fixture; the original input-only fixture remains as the staging record.
 
 ## Repository hygiene and project scope
 

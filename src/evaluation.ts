@@ -5,11 +5,11 @@ import { type Extraction, type Source } from './domain.js';
 const line=z.object({description:z.string().min(1),quantity:z.string().min(1)}).strict();
 export const normalizedExtraction=z.object({
   status:z.literal('ok'),language:z.string(),intent:z.string(),customer:z.array(z.string()),sender:z.array(z.string()),
-  date:z.array(z.string()),lines:z.array(line),evidenceValid:z.boolean()
+  po:z.array(z.string()).optional(),date:z.array(z.string()),address:z.array(z.string()).optional(),lines:z.array(line),evidenceValid:z.boolean()
 }).strict();
 const historical=z.union([normalizedExtraction,z.object({status:z.literal('error'),error:z.string().min(1)}).strict()]);
 const expected=normalizedExtraction.omit({status:true,evidenceValid:true});
-const evaluationCase=z.object({id:z.string().min(1),inputs:z.object({sources:z.array(z.object({source:z.enum(['email','pdf']),page:z.number().int().nonnegative(),text:z.string().min(1)}).strict()).min(1)}).strict(),expected,historical}).strict();
+const evaluationCase=z.object({id:z.string().min(1),inputs:z.object({sources:z.array(z.object({source:z.enum(['email','pdf']),page:z.number().int().nonnegative(),text:z.string().min(1)}).strict()).min(1)}).strict(),expected,historical:historical.optional()}).strict();
 export const evaluationFixture=z.object({humanVerified:z.literal(true),verifiedBy:z.string().min(1),verificationDate:z.string().date(),cases:z.array(evaluationCase).min(1)}).strict();
 export const candidateFixture=z.object({humanVerified:z.literal(false),providedBy:z.string().min(1),providedDate:z.string().date(),
   cases:z.array(evaluationCase.pick({id:true,inputs:true})).min(1)}).strict();
@@ -26,7 +26,8 @@ export async function readCandidateFixture(path:string) {
 
 export function normalizeExtraction(value:Extraction):NormalizedExtraction {
   return {status:'ok',language:value.reply?.language??'',intent:value.intent?.kind??'',
-    customer:value.facts.customer.map(f=>f.value),sender:value.facts.sender.map(f=>f.value),date:value.facts.date.map(f=>f.value),
+    customer:value.facts.customer.map(f=>f.value),sender:value.facts.sender.map(f=>f.value),po:value.facts.po.map(f=>f.value),
+    date:value.facts.date.map(f=>f.value),address:value.facts.address.map(f=>f.value),
     lines:value.lines.map(l=>({description:l.description.value,quantity:l.quantity.value})),evidenceValid:true};
 }
 
@@ -37,9 +38,9 @@ const sameLines=(actual:unknown,expected:ExpectedExtraction['lines'])=>Array.isA
   actual.map(v=>`${norm(String(v?.description??''))}\t${norm(String(v?.quantity??''))}`).sort()
     .every((value,index)=>value===expected.map(v=>`${norm(v.description)}\t${norm(v.quantity)}`).sort()[index]);
 
-export function extractionScores(output:unknown,reference:ExpectedExtraction) {
+export function extractionScores(output:unknown,reference:ExpectedExtraction):Record<string,number> {
   const value=output&&typeof output==='object'?output as Record<string,unknown>:{};
-  const scores={
+  const scores:Record<string,number>={
     language_match:norm(String(value.language??''))===norm(reference.language)?1:0,
     intent_match:value.intent===reference.intent?1:0,
     customer_match:sameStrings(value.customer,reference.customer)?1:0,
@@ -47,7 +48,9 @@ export function extractionScores(output:unknown,reference:ExpectedExtraction) {
     date_match:sameStrings(value.date,reference.date)?1:0,
     lines_match:sameLines(value.lines,reference.lines)?1:0,
     evidence_grounded:value.evidenceValid===true?1:0
-  } as const;
+  };
+  if(reference.po)scores.po_match=sameStrings(value.po,reference.po)?1:0;
+  if(reference.address)scores.address_match=sameStrings(value.address,reference.address)?1:0;
   return {...scores,regression_pass:Object.values(scores).every(score=>score===1)?1:0};
 }
 
