@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 
 test('learning feedback distinguishes edited, blocked and successfully approved drafts',()=>{
   const nodes=new Map<string,any>();
-  const get=(id:string)=>{if(!nodes.has(id))nodes.set(id,{value:'',textContent:'',hidden:false,className:'',addEventListener(){}});return nodes.get(id);};
+  const get=(id:string)=>{if(!nodes.has(id))nodes.set(id,{value:'',textContent:'',hidden:false,className:'',addEventListener(){},replaceChildren(){}});return nodes.get(id);};
   get('fixture').value='02-ambiguous';
   const html=readFileSync('src/learn.html','utf8');
   const context={document:{getElementById:get,querySelectorAll:()=>[],querySelector:()=>get('action')}};

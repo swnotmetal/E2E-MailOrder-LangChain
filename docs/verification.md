@@ -1,5 +1,11 @@
 > 2026-09-22 当前约束：所有后续模型调用严格只用 Gemini 2.5 Flash-Lite（`gemini-2.5-flash-lite`），使用 GOOGLE_API_KEY / ORDER_EXTRACTOR=gemini。下文旧供应商记录仅为历史，不构成继续调用的授权。用户已于 2026-09-22 撤销两次 / $0.05 本地限制，保留历史账本；额度或限流错误停止，不自动重试或切换。下文预算限制仅为历史记录；已发生一次旧供应商 401 请求。
 
+## 2026-09-24 共享库存节点与 LangSmith 排错练习
+
+- 工作流现在固定经过 `extract → resolveInventory` 再按意图分流。明确订单与询价都获得只读库存快照；只有唯一匹配的 ERP 商品才调用库存工具，`unresolved` 不猜编码。库存不足不自动拒单，也不构成预留或交付承诺。
+- 本地 TypeScript 检查通过，全量 mock 回归 36/36；订单路径实测 `FILTER-A10` 快照为 12，写入前仍停在人工 interrupt。
+- 已向 project `lca-LangGraph-Essentials-V1` 写入并读回 4 条明确标注 `synthetic / training / debug-lab` 的教学 trace，batch `debug-lab-2026-09-24T13-40-55-872Z`。覆盖正常对照、子 Tool `ERP_HTTP_503`、全绿但回复语言错误、目录未解析且不调用 Tool。没有 Gemini 或 ERP 请求，不能作为真实集成证据。
+
 ## 2026-09-24 LangSmith Dataset / Experiment
 
 - 最初真实创建 dataset `fictional-multilingual-inquiry-regression`（ID `9a917738-ca59-429a-98aa-19a4b516d9c7`），包含用户提供的英、德、爱沙尼亚、芬兰四封虚构邮件；其后已扩充为下述 9 条 gold。

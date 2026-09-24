@@ -30,6 +30,7 @@ test('clean order interrupts before HTTP write then creates a draft',async()=>{
   const x=await setup();try {
     await x.graph.invoke({sources:await sources()},config());
     let s=await x.graph.getState(config());assert.equal(x.mock.posts,0);assert.equal(s.tasks[0].interrupts.length,1);assert.deepEqual(s.values.issues,[]);
+    assert.deepEqual(s.values.availability.map((line:any)=>[line.itemCode,line.status,line.inventory?.totalActualQty]),[['FILTER-A10','recorded-stock',12]]);
     await x.graph.invoke(new Command({resume:approve(s.values)}),config());
     s=await x.graph.getState(config());assert.equal(s.values.status,'created');assert.equal(x.mock.orders[0].docstatus,0);
   }finally{await x.close();}
@@ -37,7 +38,8 @@ test('clean order interrupts before HTTP write then creates a draft',async()=>{
 test('ambiguous description stays unresolved and approval loops back',async()=>{
   const x=await setup();try {
     await x.graph.invoke({sources:await sources('02-ambiguous')},config());const s=await x.graph.getState(config());
-    assert.equal(s.values.draft.lines[0].item,'');assert.ok(s.values.items.some((i:any)=>i.name==='FILTER-A10'));assert.ok(s.values.items.some((i:any)=>i.name==='FILTER-A20'));
+    assert.equal(s.values.draft.lines[0].item,'');assert.equal(s.values.availability[0].status,'unresolved');
+    assert.ok(s.values.items.some((i:any)=>i.name==='FILTER-A10'));assert.ok(s.values.items.some((i:any)=>i.name==='FILTER-A20'));
     await x.graph.invoke(new Command({resume:approve(s.values)}),config());assert.equal(x.mock.posts,0);assert.equal((await x.graph.getState(config())).values.status,'review');
   }finally{await x.close();}
 });

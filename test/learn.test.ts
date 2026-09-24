@@ -14,14 +14,15 @@ test('learning UI API validates tools, pauses graph, resumes human review and bl
     assert.match(html,/LangChain/);assert.match(html,/scenario'\)\.onchange/);assert.match(html,/请选择样例或发送自然语言邮件/);
     assert.match(html,/understanding-error/);assert.match(html,/reply-error/);assert.match(html,/回复生成失败/);
     assert.match(html,/LangSmith feedback 已记录/);
-    assert.match(html,/目录与库存查询没有运行/);assert.match(html,/id="inquiryLines"/);
+    assert.match(html,/目录与库存查询没有运行/);assert.match(html,/id="inquiryLines"/);assert.match(html,/id="orderInventory"/);
     assert.equal((await post('tool',{itemCode:42})).status,400);
     const tool=await post('tool',{itemCode:'FILTER-A10'});
     assert.equal(tool.data.output.totalActualQty,12);
     assert.equal((await post('start',{fixture:'../../.env'})).status,400);
     const started=(await post('start',{fixture:'03-quantity-conflict'})).data;
     assert.equal(started.values.status,'review');assert.equal(started.mockWrites,0);
-    assert.ok(started.pending.length);assert.ok(started.events.some((e:any)=>e.extract));
+    assert.equal(started.values.availability[0].itemCode,'FILTER-A10');assert.equal(started.values.availability[0].inventory.totalActualQty,12);
+    assert.ok(started.pending.length);assert.ok(started.events.some((e:any)=>e.extract));assert.ok(started.events.some((e:any)=>e.resolveInventory));
     const decision={action:'approve',revision:started.values.revision,actor:'test',reason:'',draft:started.values.draft};
     const held=(await post('decide',{id:started.id,decision})).data;
     assert.match(held.pending[0].feedback,/RESOLUTION_REASON_REQUIRED/);assert.equal(held.mockWrites,0);

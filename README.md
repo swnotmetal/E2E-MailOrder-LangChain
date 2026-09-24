@@ -123,6 +123,8 @@ npm run eval:langsmith -- candidates
 
 Review the ignored `data/english-candidate-review.json`. Its `humanVerified: false` marker must remain until a person checks every proposed value against the preserved source. The five 2026-09-24 candidates have now been checked by the repository owner and copied into the committed gold fixture; the original input-only fixture remains as the staging record.
 
+For a no-model observability exercise, `npm run trace:lab` publishes four explicitly synthetic traces covering a good control, a handled ERP tool error, a wrong-language semantic failure, and a safely unresolved catalog item. Follow [the LangSmith debugging lab](docs/langsmith-debug-lab.md) to inspect, annotate, monitor, and turn selected cases into a regression dataset.
+
 ## Repository hygiene and project scope
 
 - `.env`, `.env.erp`, `data/`, local Miko state, dependency folders, ERP containers, logs, coverage, and temporary/backup files are ignored.

@@ -9,6 +9,7 @@ import { type Source, type Extraction, type Draft, type Issue, type Customer, ty
 const State = Annotation.Root({
   sources:Annotation<Source[]>(), extracted:Annotation<Extraction>(), draft:Annotation<Draft>(),
   customers:Annotation<Customer[]>(), items:Annotation<Item[]>(), addresses:Annotation<Address[]>(),
+  availability:Annotation<InquiryLine[]>(),
   issues:Annotation<Issue[]>(), status:Annotation<string>(), revision:Annotation<string>(),
   decision:Annotation<unknown>(), inquiry:Annotation<InquiryCase>(), order:Annotation<string>(),
   audit:Annotation<unknown[]>({reducer:(a,b)=>a.concat(b),default:()=>[]})
@@ -85,6 +86,26 @@ const templateReplyDrafter:InquiryReplyDrafter=async inquiry=>({
 
 export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor, draftReply:InquiryReplyDrafter=templateReplyDrafter) {
   const inventoryReader=inventoryTool(erp);
+  async function resolveAvailability(extracted:Extraction) {
+    const items=await erp.items();
+    const email=extracted.lines.filter(line=>line.description.evidence.source==='email');
+    const pdf=extracted.lines.filter(line=>line.description.evidence.source==='pdf');
+    const selected=extracted.intent?.kind==='purchase'?(pdf.length?pdf:email):(email.length?email:extracted.lines);
+    const availability=await Promise.all(selected.map(async line=>{
+      const itemText=line.description.value;
+      const itemMatches=matchingItems(items,itemText);
+      const itemCode=itemMatches.length===1?itemMatches[0].name:'';
+      const base={itemText,itemCode,quantity:line.quantity.value};
+      if(!itemCode) return {...base,status:'unresolved',inventory:null} as InquiryLine;
+      try {
+        const stock=await inventoryReader.invoke({itemCode});
+        const inventory={stockTracked:stock.stockTracked,totalActualQty:stock.totalActualQty};
+        const status=!stock.stockTracked||stock.totalActualQty===null?'untracked':stock.totalActualQty===0?'out-of-stock':'recorded-stock';
+        return {...base,status,inventory} as InquiryLine;
+      } catch {return {...base,status:'lookup-failed',inventory:null} as InquiryLine;}
+    }));
+    return {items,availability};
+  }
   async function checkERP(d:Draft) {
     const [customers,items,addresses] = await Promise.all([erp.customers(),erp.items(),d.customer?erp.addresses(d.customer):Promise.resolve([])]);
     const issues = validate(d);
@@ -101,29 +122,16 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const extracted=await extract(s.sources); verifyEvidence(extracted,s.sources);
       return {extracted,status:'extracted'};
     })
+    .addNode('resolveInventory',async s=>({...await resolveAvailability(s.extracted),status:'inventory-checked'}))
     .addNode('prepareInquiry',async s=>{
-      const [customers,items]=await Promise.all([erp.customers(),erp.items()]);
+      const customers=await erp.customers();
       const value=(f:typeof fields[number])=>s.extracted.facts[f][0]?.value??'';
       const customerText=value('customer');
       const senderName=s.extracted.facts.sender[0]?.value??'';
       const customerMatches=customers.filter(c=>[c.name,c.customer_name].some(v=>normalize(v)===normalize(customerText)));
       const needs:string[]=[];
       if(customerMatches.length!==1) needs.push('确认客户身份或选择 ERP 客户；这不妨碍先回复一般询价');
-      const emailLines=s.extracted.lines.filter(line=>line.description.evidence.source==='email');
-      const extractedLines=emailLines.length?emailLines:s.extracted.lines;
-      const lines=await Promise.all(extractedLines.map(async line=>{
-        const itemText=line.description.value;
-        const itemMatches=matchingItems(items,itemText);
-        const itemCode=itemMatches.length===1?itemMatches[0].name:'';
-        const base={itemText,itemCode,quantity:line.quantity.value};
-        if(!itemCode) return {...base,status:'unresolved',inventory:null} as InquiryLine;
-        try {
-          const stock=await inventoryReader.invoke({itemCode});
-          const inventory={stockTracked:stock.stockTracked,totalActualQty:stock.totalActualQty};
-          const status=!stock.stockTracked||stock.totalActualQty===null?'untracked':stock.totalActualQty===0?'out-of-stock':'recorded-stock';
-          return {...base,status,inventory} as InquiryLine;
-        } catch {return {...base,status:'lookup-failed',inventory:null} as InquiryLine;}
-      }));
+      const lines=s.availability;
       if(lines.some(line=>line.status==='unresolved')) needs.push('确认未能唯一匹配的准确商品编码');
       if(lines.some(line=>line.status==='untracked')) needs.push('库存数量未跟踪，需要人工确认');
       if(lines.some(line=>line.status==='lookup-failed')) needs.push('库存查询失败，需要人工确认');
@@ -134,7 +142,7 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const language=replyLanguage(sourceText,s.extracted.reply?.language);
       const inquiry:InquiryCase={intent,customerText,senderName,
         customer:customerMatches.length===1?customerMatches[0].name:'',lines,condition,requestedDate:value('date'),needs,replyLanguage:language,responseDraft:''};
-      return {inquiry,customers,items,issues:[],status:'inquiry-prepared'};
+      return {inquiry,customers,issues:[],status:'inquiry-prepared'};
     })
     .addNode('draftInquiryReply',async s=>{
       const reply=await draftReply(s.inquiry);
@@ -156,7 +164,7 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       }
     })
     .addNode('match',async s=>{
-      const [customers,items]=await Promise.all([erp.customers(),erp.items()]);
+      const customers=await erp.customers(),items=s.items;
       const e=s.extracted, issues:Issue[]=[];
       const value=(f:typeof fields[number])=>e.facts[f][0]?.value??'';
       for(const f of fields) if(new Set(e.facts[f].map(x=>normalize(x.value))).size>1) issues.push({code:'SOURCE_CONFLICT',field:f,message:`Email/PDF disagree on ${f}`});
@@ -205,7 +213,8 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       return {order:order.name,status:'created',issues:[]};
     })
     .addEdge(START,'extract')
-    .addConditionalEdges('extract',s=>s.extracted.intent && s.extracted.intent.kind!=='purchase'?'prepareInquiry':'match',['prepareInquiry','match'])
+    .addEdge('extract','resolveInventory')
+    .addConditionalEdges('resolveInventory',s=>s.extracted.intent && s.extracted.intent.kind!=='purchase'?'prepareInquiry':'match',['prepareInquiry','match'])
     .addEdge('prepareInquiry','draftInquiryReply')
     .addEdge('draftInquiryReply','inquiryReview')
     .addConditionalEdges('inquiryReview',s=>s.status==='inquiry-review'?'inquiryReview':END,['inquiryReview',END])

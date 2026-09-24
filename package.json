@@ -15,7 +15,8 @@
     "fixtures": "tsx scripts/fixtures.ts",
     "demo": "tsx scripts/demo.ts",
     "evaluate": "tsx scripts/evaluate.ts",
-    "eval:langsmith": "tsx scripts/langsmith-evaluation.ts"
+    "eval:langsmith": "tsx scripts/langsmith-evaluation.ts",
+    "trace:lab": "tsx scripts/langsmith-debug-lab.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.2.12",
