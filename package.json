@@ -16,7 +16,8 @@
     "demo": "tsx scripts/demo.ts",
     "evaluate": "tsx scripts/evaluate.ts",
     "eval:langsmith": "tsx scripts/langsmith-evaluation.ts",
-    "trace:lab": "tsx scripts/langsmith-debug-lab.ts"
+    "trace:lab": "tsx scripts/langsmith-debug-lab.ts",
+    "trace:blind": "tsx scripts/langsmith-blind-mail.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.2.12",

@@ -44,44 +44,46 @@ function replyLanguage(sourceText:string,modelLanguage?:string) {
 function inventoryText(line:InquiryLine,language:string) {
   const item=line.itemCode||line.itemText||'—';
   const qty=line.quantity||'?';
+  const recorded=line.inventory?.totalActualQty;
+  const covers=recorded!==null&&recorded!==undefined&&Number.isFinite(Number(qty))&&recorded>=Number(qty);
   if(language==='zh') {
-    if(line.status==='recorded-stock') return `${item}：询问数量 ${qty}；ERP 当前记录库存 ${line.inventory?.totalActualQty}（这不是预留或交付承诺）。`;
-    if(line.status==='out-of-stock') return `${item}：询问数量 ${qty}；ERP 当前记录库存为 0，暂不能确认供货。`;
-    if(line.status==='untracked') return `${item}：询问数量 ${qty}；ERP 不跟踪该商品库存数量，需要人工确认。`;
+    if(line.status==='recorded-stock'&&covers) return `${item}：我们正在核实是否可从当前库存安排您需要的 ${qty} 件。`;
+    if(line.status==='recorded-stock'||line.status==='out-of-stock') return `${item}：目前无法确认您需要的 ${qty} 件，我们正在核实补货及替代方案。`;
+    if(line.status==='untracked') return `${item}：您需要 ${qty} 件，库存情况正在人工核实。`;
     if(line.status==='lookup-failed') return `${item}：询问数量 ${qty}；库存查询失败，需要人工确认。`;
-    return `${item}：询问数量 ${qty}；无法唯一匹配 ERP 商品，请确认准确商品编码。`;
+    return `${item}：您需要 ${qty} 件；请提供车型和年份、现有零件号、照片或尺寸，以便我们确认正确配件。`;
   }
   if(language==='de') {
-    if(line.status==='recorded-stock') return `${item}: angefragte Menge ${qty}; im ERP erfasster Bestand ${line.inventory?.totalActualQty} (keine Reservierungs- oder Lieferzusage).`;
-    if(line.status==='out-of-stock') return `${item}: angefragte Menge ${qty}; erfasster ERP-Bestand 0, daher können wir die Verfügbarkeit derzeit nicht bestätigen.`;
-    if(line.status==='untracked') return `${item}: angefragte Menge ${qty}; die Bestandsmenge wird im ERP nicht geführt und muss geprüft werden.`;
+    if(line.status==='recorded-stock'&&covers) return `${item}: Wir prüfen, ob die angefragten ${qty} Stück aus dem aktuellen Bestand zugeteilt werden können.`;
+    if(line.status==='recorded-stock'||line.status==='out-of-stock') return `${item}: Die angefragten ${qty} Stück können wir derzeit nicht bestätigen; wir prüfen Nachschub und Alternativen.`;
+    if(line.status==='untracked') return `${item}: Die Verfügbarkeit der angefragten ${qty} Stück wird manuell geprüft.`;
     if(line.status==='lookup-failed') return `${item}: angefragte Menge ${qty}; die Bestandsabfrage ist fehlgeschlagen und muss geprüft werden.`;
-    return `${item}: angefragte Menge ${qty}; kein eindeutiger ERP-Artikel gefunden. Bitte bestätigen Sie die genaue Artikelnummer.`;
+    return `${item}: Für die angefragten ${qty} Stück benötigen wir bitte Fahrzeugmarke, Modell und Baujahr oder alternativ die vorhandene Teilenummer, ein Foto oder Abmessungen.`;
   }
   if(language==='et') {
-    if(line.status==='recorded-stock') return `${item}: küsitud kogus ${qty}; ERP-s registreeritud laoseis ${line.inventory?.totalActualQty} (see ei ole broneering ega tarnelubadus).`;
-    if(line.status==='out-of-stock') return `${item}: küsitud kogus ${qty}; ERP-s registreeritud laoseis on 0, seega ei saa saadavust praegu kinnitada.`;
-    if(line.status==='untracked') return `${item}: küsitud kogus ${qty}; ERP ei jälgi selle toote laokogust ja see vajab käsitsi kontrolli.`;
+    if(line.status==='recorded-stock'&&covers) return `${item}: kontrollime, kas soovitud ${qty} tk saab praegusest laost eraldada.`;
+    if(line.status==='recorded-stock'||line.status==='out-of-stock') return `${item}: soovitud ${qty} tk ei saa praegu kinnitada; kontrollime juurdevedu ja alternatiive.`;
+    if(line.status==='untracked') return `${item}: soovitud ${qty} tk saadavust kontrollitakse käsitsi.`;
     if(line.status==='lookup-failed') return `${item}: küsitud kogus ${qty}; laopäring ebaõnnestus ja vajab käsitsi kontrolli.`;
-    return `${item}: küsitud kogus ${qty}; ühest ERP toodet ei leitud. Palun kinnitage täpne tootekood.`;
+    return `${item}: soovitud ${qty} tk tuvastamiseks palume sõiduki marki, mudelit ja aastat või olemasoleva osa numbrit, fotot või mõõte.`;
   }
-  if(line.status==='recorded-stock') return `${item}: requested quantity ${qty}; recorded ERP stock is ${line.inventory?.totalActualQty} (not a reservation or delivery commitment).`;
-  if(line.status==='out-of-stock') return `${item}: requested quantity ${qty}; recorded ERP stock is 0, so availability cannot currently be confirmed.`;
-  if(line.status==='untracked') return `${item}: requested quantity ${qty}; ERP does not track a stock quantity for this item, so manual confirmation is needed.`;
+  if(line.status==='recorded-stock'&&covers) return `${item}: we are checking whether the requested quantity of ${qty} can be allocated from current stock.`;
+  if(line.status==='recorded-stock'||line.status==='out-of-stock') return `${item}: we cannot currently confirm the requested quantity of ${qty}; we are checking replenishment and alternatives.`;
+  if(line.status==='untracked') return `${item}: availability for the requested quantity of ${qty} is being checked manually.`;
   if(line.status==='lookup-failed') return `${item}: requested quantity ${qty}; the inventory lookup failed and needs manual confirmation.`;
-  return `${item}: requested quantity ${qty}; no unique ERP item was found. Please confirm the exact item code.`;
+  return `${item}: for the requested quantity of ${qty}, please share the vehicle make, model and year, or an existing part number, photo or dimensions so we can identify the right part.`;
 }
 
-function draftInquiryReply(senderName:string,lines:InquiryLine[],language:string) {
+function draftInquiryReply(senderName:string,lines:InquiryLine[],language:string,requestedDate:string,deliveryAddress:string) {
   const details=lines.map(line=>`- ${inventoryText(line,language)}`).join('\n');
-  if(language==='zh') return `您好${senderName?`，${senderName}`:''}：\n\n感谢您的询价。我们已检查当前目录和只读库存记录：\n\n${details}\n\n价格和您要求的交付日期仍需人工确认。确认后我们会发送正式报价；本邮件不构成库存预留或交付承诺。\n\n此致\n销售团队`;
-  if(language==='de') return `Guten Tag${senderName?` ${senderName}`:''},\n\nvielen Dank für Ihre Anfrage. Wir haben den aktuellen Katalog und die schreibgeschützten Bestandsdaten geprüft:\n\n${details}\n\nPreise und der gewünschte Liefertermin müssen noch bestätigt werden. Danach senden wir Ihnen ein verbindliches Angebot; diese Nachricht reserviert keine Ware und ist keine Lieferzusage.\n\nMit freundlichen Grüßen\nVertriebsteam`;
-  if(language==='et') return `Tere${senderName?` ${senderName}`:''},\n\ntäname päringu eest. Kontrollisime praegust kataloogi ja kirjutuskaitstud laoseisu:\n\n${details}\n\nHinnad ja soovitud tarnekuupäev vajavad veel kinnitamist. Seejärel saadame kinnitatud pakkumise; käesolev kiri ei broneeri kaupa ega anna tarnelubadust.\n\nLugupidamisega\nMüügimeeskond`;
-  return `Hello${senderName?` ${senderName}`:''},\n\nThank you for your inquiry. We checked the current catalog and read-only inventory records:\n\n${details}\n\nPrices and your requested delivery date still need human confirmation. We will send a confirmed quotation after those checks; this message does not reserve stock or promise delivery.\n\nBest regards,\nSales team`;
+  if(language==='zh') return `您好${senderName?`，${senderName}`:''}：\n\n感谢您的询价。以下是我们目前正在核实的情况：\n\n${details}\n\n我们会在正式报价中一并提供价格，并确认${[requestedDate,deliveryAddress].filter(Boolean).join('，')||'您要求的交付安排'}是否可行。在正式确认前，库存尚未预留。\n\n此致\n销售团队`;
+  if(language==='de') return `Guten Tag${senderName?` ${senderName}`:''},\n\nvielen Dank für Ihre Anfrage. Wir prüfen derzeit Folgendes:\n\n${details}\n\nUnser zusammengefasstes Angebot enthält die Preise und bestätigt, ob ${[requestedDate,deliveryAddress].filter(Boolean).join(' / ')||'die gewünschte Lieferung'} möglich ist. Bis zur Bestätigung ist keine Ware reserviert.\n\nMit freundlichen Grüßen\nVertriebsteam`;
+  if(language==='et') return `Tere${senderName?` ${senderName}`:''},\n\ntäname päringu eest. Kontrollime praegu järgmist:\n\n${details}\n\nKoondpakkumises esitame hinnad ja kinnitame, kas ${[requestedDate,deliveryAddress].filter(Boolean).join(' / ')||'soovitud tarne'} on võimalik. Kuni kinnitamiseni ei ole kaup broneeritud.\n\nLugupidamisega\nMüügimeeskond`;
+  return `Hello${senderName?` ${senderName}`:''},\n\nThank you for your inquiry. We are currently checking the following:\n\n${details}\n\nOur consolidated quotation will include pricing and confirm whether ${[requestedDate,deliveryAddress].filter(Boolean).join(' to ')||'the requested delivery'} is feasible. No stock is reserved until we confirm it.\n\nBest regards,\nSales team`;
 }
 
 const templateReplyDrafter:InquiryReplyDrafter=async inquiry=>({
-  draft:draftInquiryReply(inquiry.senderName,inquiry.lines,inquiry.replyLanguage),language:inquiry.replyLanguage
+  draft:draftInquiryReply(inquiry.senderName,inquiry.lines,inquiry.replyLanguage,inquiry.requestedDate,inquiry.deliveryAddress),language:inquiry.replyLanguage
 });
 
 export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor, draftReply:InquiryReplyDrafter=templateReplyDrafter) {
@@ -141,7 +143,7 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const sourceText=s.sources.find(source=>source.source==='email')?.text??s.sources[0]?.text??'';
       const language=replyLanguage(sourceText,s.extracted.reply?.language);
       const inquiry:InquiryCase={intent,customerText,senderName,
-        customer:customerMatches.length===1?customerMatches[0].name:'',lines,condition,requestedDate:value('date'),needs,replyLanguage:language,responseDraft:''};
+        customer:customerMatches.length===1?customerMatches[0].name:'',lines,condition,requestedDate:value('date'),deliveryAddress:value('address'),needs,replyLanguage:language,responseDraft:''};
       return {inquiry,customers,issues:[],status:'inquiry-prepared'};
     })
     .addNode('draftInquiryReply',async s=>{

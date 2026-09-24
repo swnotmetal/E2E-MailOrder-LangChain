@@ -92,10 +92,11 @@ test('Gemini drafts an inquiry reply from structured ERP results in the requeste
     assert.equal(body.tools[0].functionDeclarations[0].name,'draft_inquiry_reply');
     assert.equal(body.toolConfig.functionCallingConfig.mode,'ANY');
     const input=JSON.parse(body.contents[0].parts[0].text);
-    assert.equal(input.language,'fi');assert.equal(input.requestedDate,'15. lokakuuta 2026');assert.equal(input.lines[0].status,'out-of-stock');assert.equal(input.lines[0].inventory.totalActualQty,0);
-    return Response.json({candidates:[{content:{parts:[{functionCall:{name:'draft_inquiry_reply',args:{draft:'Hei Matti,\n\nFILTER-A20: pyydetty määrä 10, ERP:n kirjattu saldo 0. Hinta ja toimitus 15. lokakuuta 2026 mennessä vahvistetaan erikseen.\n\nYstävällisin terveisin,\nMyyntitiimi'}}}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:30}});
+    assert.equal(input.language,'fi');assert.equal(input.requestedDate,'15. lokakuuta 2026');assert.equal(input.deliveryAddress,'Testikatu 1, Helsinki');
+    assert.equal(input.lines[0].availability,'requested-quantity-not-currently-confirmed');assert.equal('inventory' in input.lines[0],false);assert.equal('itemCode' in input.lines[0],false);
+    return Response.json({candidates:[{content:{parts:[{functionCall:{name:'draft_inquiry_reply',args:{draft:'Hei Matti,\n\nEmme voi vielä vahvistaa pyydettyä FILTER-A20-määrää. Selvitämme täydennystä ja vaihtoehtoja. Lähetämme hinnan ja toimitusarvion yhtenä tarjouksena.\n\nYstävällisin terveisin,\nMyyntitiimi'}}}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:30}});
   });
-  const inquiry:InquiryCase={intent:'inquiry',customerText:'Fictional Oy',senderName:'Matti',customer:'',condition:'saatavuutta',requestedDate:'15. lokakuuta 2026',
+  const inquiry:InquiryCase={intent:'inquiry',customerText:'Fictional Oy',senderName:'Matti',customer:'',condition:'saatavuutta',requestedDate:'15. lokakuuta 2026',deliveryAddress:'Testikatu 1, Helsinki',
     lines:[{itemText:'Filter A20',itemCode:'FILTER-A20',quantity:'10',status:'out-of-stock',inventory:{stockTracked:true,totalActualQty:0}}],
     needs:['确认适用价格','确认客户要求的交期能否满足'],replyLanguage:'fi',responseDraft:''};
   try {

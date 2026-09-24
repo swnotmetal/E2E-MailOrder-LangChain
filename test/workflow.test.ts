@@ -130,8 +130,9 @@ test('inquiry and conditional intents use reply review without order validation 
       const s=await graph.getState(config());
       assert.equal(s.values.status,'inquiry-review');assert.deepEqual(s.values.issues,[]);
       assert.equal(s.values.inquiry.lines[0].itemCode,'FILTER-A10');assert.equal(s.values.inquiry.lines[0].inventory.totalActualQty,12);
-      assert.match(s.values.inquiry.responseDraft,/recorded ERP stock is 12/);
-      assert.match(s.values.inquiry.responseDraft,/Prices and your requested delivery date still need human confirmation/);
+      assert.match(s.values.inquiry.responseDraft,/checking whether the requested quantity of 5 can be allocated/);
+      assert.match(s.values.inquiry.responseDraft,/consolidated quotation will include pricing/);
+      assert.doesNotMatch(s.values.inquiry.responseDraft,/ERP|stock is 12/);
       assert.doesNotMatch(s.values.inquiry.responseDraft,/No order has been created/);
       assert.equal((s.tasks[0].interrupts[0].value as any).kind,'inquiry');
       const decision:InquiryDecision={action:'approve-reply',revision:s.values.revision,actor:'test-operator',reason:'Checked fictional reply',responseDraft:s.values.inquiry.responseDraft};
@@ -162,8 +163,8 @@ test('inquiry fallback reply follows a Chinese customer message',async()=>{
       intent:{kind:'inquiry' as const,evidence:fact('想了解')},lines:[{description:fact('FILTER-A10'),quantity:fact('5'),unit:empty}]}));
     await graph.invoke({sources:[{source:'email',page:0,text}]},config('chinese-reply'));
     const s=await graph.getState(config('chinese-reply'));
-    assert.match(s.values.inquiry.responseDraft,/您好/);assert.match(s.values.inquiry.responseDraft,/ERP 当前记录库存 12/);
-    assert.match(s.values.inquiry.responseDraft,/价格和您要求的交付日期仍需人工确认/);
+    assert.match(s.values.inquiry.responseDraft,/您好/);assert.match(s.values.inquiry.responseDraft,/正在核实是否可从当前库存安排您需要的 5 件/);
+    assert.match(s.values.inquiry.responseDraft,/正式报价中一并提供价格/);assert.doesNotMatch(s.values.inquiry.responseDraft,/库存 12|ERP/);
     assert.doesNotMatch(s.values.inquiry.responseDraft,/Our team/);assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });
@@ -214,10 +215,11 @@ test('multi-product English inquiry reports every read-only ERP result and ignor
       ['','unresolved',null],['','unresolved',null],['','unresolved',null]
     ]);
     assert.match(inquiry.responseDraft,/Hello Toomas Tamm/);assert.doesNotMatch(inquiry.responseDraft,/Tere/);
-    assert.match(inquiry.responseDraft,/FILTER-A20: requested quantity 10; recorded ERP stock is 0/);
-    assert.match(inquiry.responseDraft,/THERM-S1: requested quantity 15; recorded ERP stock is 40/);
-    assert.match(inquiry.responseDraft,/Thermostat X-200: requested quantity 5; no unique ERP item was found/);
-    assert.match(inquiry.responseDraft,/Prices and your requested delivery date still need human confirmation/);
+    assert.match(inquiry.responseDraft,/FILTER-A20: we cannot currently confirm the requested quantity of 10/);
+    assert.match(inquiry.responseDraft,/THERM-S1: we are checking whether the requested quantity of 15 can be allocated/);
+    assert.match(inquiry.responseDraft,/Thermostat X-200: for the requested quantity of 5, please share the vehicle make/);
+    assert.match(inquiry.responseDraft,/consolidated quotation will include pricing/);
+    assert.doesNotMatch(inquiry.responseDraft,/recorded ERP stock|stock is 0|stock is 40|exact item code/);
     assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });
