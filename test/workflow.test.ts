@@ -211,16 +211,42 @@ test('multi-product English inquiry reports every read-only ERP result and ignor
     const s=await graph.getState(config('multi-inquiry'));const inquiry=s.values.inquiry;
     assert.equal(inquiry.replyLanguage,'en');assert.equal(inquiry.lines.length,6);
     assert.deepEqual(inquiry.lines.map((line:any)=>[line.itemCode,line.status,line.inventory?.totalActualQty??null]),[
-      ['FILTER-A20','out-of-stock',0],['','unresolved',null],['THERM-S1','recorded-stock',40],
-      ['','unresolved',null],['','unresolved',null],['','unresolved',null]
+      ['FILTER-A20','out-of-stock',0],['','catalog-miss',null],['THERM-S1','recorded-stock',40],
+      ['','catalog-miss',null],['','catalog-miss',null],['','unresolved',null]
     ]);
     assert.match(inquiry.responseDraft,/Hello Toomas Tamm/);assert.doesNotMatch(inquiry.responseDraft,/Tere/);
     assert.match(inquiry.responseDraft,/FILTER-A20: we cannot currently confirm the requested quantity of 10/);
     assert.match(inquiry.responseDraft,/THERM-S1: we are checking whether the requested quantity of 15 can be allocated/);
-    assert.match(inquiry.responseDraft,/Thermostat X-200: for the requested quantity of 5, please share the vehicle make/);
+    assert.match(inquiry.responseDraft,/Thermostat X-200: our team is checking whether this product can be supplied/);
     assert.match(inquiry.responseDraft,/consolidated quotation will include pricing/);
     assert.doesNotMatch(inquiry.responseDraft,/recorded ERP stock|stock is 0|stock is 40|exact item code/);
     assert.equal(x.mock.posts,0);
+  }finally{await x.close();}
+});
+test('inquiry keeps only narrowed catalog candidates out of traced graph state',async()=>{
+  const x=await setup();try{
+    const text='Hello, Apex Logistics Solutions needs 35 2026 Paragon GT Commercial Motorcycles.';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const empty={value:'',evidence:{source:'email' as const,page:0,start:0,end:0,quote:''}};
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[fact('Apex Logistics Solutions')],sender:[],location:[],po:[],date:[],address:[]},
+      intent:{kind:'inquiry' as const,evidence:fact('needs')},reply:{language:'en'},lines:[{description:fact('2026 Paragon GT Commercial Motorcycles'),quantity:fact('35'),unit:empty}]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('narrow-state'));
+    const values=(await graph.getState(config('narrow-state'))).values;
+    assert.deepEqual(values.items,[]);assert.equal('customers' in values,false);
+    assert.equal(values.inquiry.lines[0].status,'catalog-miss');
+    assert.match(values.inquiry.responseDraft,/our team is checking whether this product can be supplied/);
+    assert.doesNotMatch(values.inquiry.responseDraft,/vehicle make|part number/);
+  }finally{await x.close();}
+});
+test('missing grounded intent goes to human inquiry review, never the order path',async()=>{
+  const x=await setup();try{
+    const text='A fictional customer sent an unclear free-form email.';
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[],sender:[],location:[],po:[],date:[],address:[]},lines:[],reply:{language:'en'},
+      warnings:[{code:'UNRESOLVED_MODEL_EVIDENCE',field:'intent',message:'Confirm intent from the original message'}]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('unresolved-intent'));
+    const values=(await graph.getState(config('unresolved-intent'))).values;
+    assert.equal(values.status,'inquiry-review');assert.equal(values.inquiry.intent,'unclear');assert.equal(x.mock.posts,0);
+    assert.ok(values.inquiry.needs.some((need:string)=>need.includes('intent')));
   }finally{await x.close();}
 });
 test('same PO with changed approved content is never silently reused',async()=>{

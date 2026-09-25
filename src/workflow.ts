@@ -50,28 +50,32 @@ function inventoryText(line:InquiryLine,language:string) {
     if(line.status==='recorded-stock'&&covers) return `${item}：我们正在核实是否可从当前库存安排您需要的 ${qty} 件。`;
     if(line.status==='recorded-stock'||line.status==='out-of-stock') return `${item}：目前无法确认您需要的 ${qty} 件，我们正在核实补货及替代方案。`;
     if(line.status==='untracked') return `${item}：您需要 ${qty} 件，库存情况正在人工核实。`;
+    if(line.status==='catalog-miss') return `${item}：我们的团队正在核实该商品是否可以供应。`;
     if(line.status==='lookup-failed') return `${item}：询问数量 ${qty}；库存查询失败，需要人工确认。`;
-    return `${item}：您需要 ${qty} 件；请提供车型和年份、现有零件号、照片或尺寸，以便我们确认正确配件。`;
+    return `${item}：您需要 ${qty} 件；请提供该商品的型号、规格、制造商参考号或其他识别信息，以便我们确认准确商品。`;
   }
   if(language==='de') {
     if(line.status==='recorded-stock'&&covers) return `${item}: Wir prüfen, ob die angefragten ${qty} Stück aus dem aktuellen Bestand zugeteilt werden können.`;
     if(line.status==='recorded-stock'||line.status==='out-of-stock') return `${item}: Die angefragten ${qty} Stück können wir derzeit nicht bestätigen; wir prüfen Nachschub und Alternativen.`;
     if(line.status==='untracked') return `${item}: Die Verfügbarkeit der angefragten ${qty} Stück wird manuell geprüft.`;
+    if(line.status==='catalog-miss') return `${item}: Unser Team prüft derzeit, ob dieser Artikel lieferbar ist.`;
     if(line.status==='lookup-failed') return `${item}: angefragte Menge ${qty}; die Bestandsabfrage ist fehlgeschlagen und muss geprüft werden.`;
-    return `${item}: Für die angefragten ${qty} Stück benötigen wir bitte Fahrzeugmarke, Modell und Baujahr oder alternativ die vorhandene Teilenummer, ein Foto oder Abmessungen.`;
+    return `${item}: Bitte teilen Sie uns Modell, Variante, Spezifikation, Herstellerreferenz oder andere Identifikationsmerkmale mit, damit wir den genauen Artikel bestätigen können.`;
   }
   if(language==='et') {
     if(line.status==='recorded-stock'&&covers) return `${item}: kontrollime, kas soovitud ${qty} tk saab praegusest laost eraldada.`;
     if(line.status==='recorded-stock'||line.status==='out-of-stock') return `${item}: soovitud ${qty} tk ei saa praegu kinnitada; kontrollime juurdevedu ja alternatiive.`;
     if(line.status==='untracked') return `${item}: soovitud ${qty} tk saadavust kontrollitakse käsitsi.`;
+    if(line.status==='catalog-miss') return `${item}: meie meeskond kontrollib, kas seda toodet on võimalik tarnida.`;
     if(line.status==='lookup-failed') return `${item}: küsitud kogus ${qty}; laopäring ebaõnnestus ja vajab käsitsi kontrolli.`;
-    return `${item}: soovitud ${qty} tk tuvastamiseks palume sõiduki marki, mudelit ja aastat või olemasoleva osa numbrit, fotot või mõõte.`;
+    return `${item}: palun saatke mudel, variant, spetsifikatsioon, tootja viide või muud tunnused, et saaksime täpse toote kinnitada.`;
   }
   if(line.status==='recorded-stock'&&covers) return `${item}: we are checking whether the requested quantity of ${qty} can be allocated from current stock.`;
   if(line.status==='recorded-stock'||line.status==='out-of-stock') return `${item}: we cannot currently confirm the requested quantity of ${qty}; we are checking replenishment and alternatives.`;
   if(line.status==='untracked') return `${item}: availability for the requested quantity of ${qty} is being checked manually.`;
+  if(line.status==='catalog-miss') return `${item}: our team is checking whether this product can be supplied.`;
   if(line.status==='lookup-failed') return `${item}: requested quantity ${qty}; the inventory lookup failed and needs manual confirmation.`;
-  return `${item}: for the requested quantity of ${qty}, please share the vehicle make, model and year, or an existing part number, photo or dimensions so we can identify the right part.`;
+  return `${item}: for the requested quantity of ${qty}, please share the model, variant, specification, manufacturer reference or any other identifying details so we can confirm the exact product.`;
 }
 
 function draftInquiryReply(senderName:string,lines:InquiryLine[],language:string,requestedDate:string,deliveryAddress:string) {
@@ -89,16 +93,17 @@ const templateReplyDrafter:InquiryReplyDrafter=async inquiry=>({
 export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor, draftReply:InquiryReplyDrafter=templateReplyDrafter) {
   const inventoryReader=inventoryTool(erp);
   async function resolveAvailability(extracted:Extraction) {
-    const items=await erp.items();
     const email=extracted.lines.filter(line=>line.description.evidence.source==='email');
     const pdf=extracted.lines.filter(line=>line.description.evidence.source==='pdf');
     const selected=extracted.intent?.kind==='purchase'?(pdf.length?pdf:email):(email.length?email:extracted.lines);
-    const availability=await Promise.all(selected.map(async line=>{
+    const candidates=await Promise.all(selected.map(line=>erp.findItems(line.description.value)));
+    const items=[...new Map(candidates.flat().map(item=>[item.name,item])).values()];
+    const availability=await Promise.all(selected.map(async (line,index)=>{
       const itemText=line.description.value;
-      const itemMatches=matchingItems(items,itemText);
+      const itemMatches=matchingItems(candidates[index],itemText);
       const itemCode=itemMatches.length===1?itemMatches[0].name:'';
       const base={itemText,itemCode,quantity:line.quantity.value};
-      if(!itemCode) return {...base,status:'unresolved',inventory:null} as InquiryLine;
+      if(!itemCode) return {...base,status:candidates[index].length?'unresolved':'catalog-miss',inventory:null} as InquiryLine;
       try {
         const stock=await inventoryReader.invoke({itemCode});
         const inventory={stockTracked:stock.stockTracked,totalActualQty:stock.totalActualQty};
@@ -109,12 +114,12 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
     return {items,availability};
   }
   async function checkERP(d:Draft) {
-    const [customers,items,addresses] = await Promise.all([erp.customers(),erp.items(),d.customer?erp.addresses(d.customer):Promise.resolve([])]);
+    const [customers,itemMatches,addresses] = await Promise.all([erp.findCustomers(d.customer),Promise.all(d.lines.map(l=>erp.findItems(l.item))),d.customer?erp.addresses(d.customer):Promise.resolve([])]);
     const issues = validate(d);
     if(!customers.some(c=>c.name===d.customer)) issues.push({code:'UNKNOWN_CUSTOMER',field:'customer',message:'Select an ERP customer'});
     if(!addresses.some(a=>a.name===d.address)) issues.push({code:'ADDRESS_MISMATCH',field:'address',message:'Choose a linked ERP shipping address'});
     d.lines.forEach((l,i)=>{
-      const item=items.find(x=>x.name===l.item);
+      const item=itemMatches[i].find(x=>x.name===l.item);
       if(!item || item.stock_uom!==l.unit) issues.push({code:'ITEM_OR_UNIT',field:`lines.${i}`,message:'Item must exist and unit must equal stock UOM'});
     });
     return issues;
@@ -126,25 +131,27 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
     })
     .addNode('resolveInventory',async s=>({...await resolveAvailability(s.extracted),status:'inventory-checked'}))
     .addNode('prepareInquiry',async s=>{
-      const customers=await erp.customers();
       const value=(f:typeof fields[number])=>s.extracted.facts[f][0]?.value??'';
       const customerText=value('customer');
       const senderName=s.extracted.facts.sender[0]?.value??'';
+      const customers=await erp.findCustomers(customerText);
       const customerMatches=customers.filter(c=>[c.name,c.customer_name].some(v=>normalize(v)===normalize(customerText)));
-      const needs:string[]=[];
+      const needs:string[]=(s.extracted.warnings??[]).map(w=>`${w.field} 的模型证据不可靠，请对照原邮件确认`);
       if(customerMatches.length!==1) needs.push('确认客户身份或选择 ERP 客户；这不妨碍先回复一般询价');
       const lines=s.availability;
       if(lines.some(line=>line.status==='unresolved')) needs.push('确认未能唯一匹配的准确商品编码');
+      if(lines.some(line=>line.status==='catalog-miss')) needs.push('ERP 目录没有候选商品，由人工确认是否供应；不要要求客户解决内部目录问题');
       if(lines.some(line=>line.status==='untracked')) needs.push('库存数量未跟踪，需要人工确认');
       if(lines.some(line=>line.status==='lookup-failed')) needs.push('库存查询失败，需要人工确认');
       needs.push('确认适用价格','确认客户要求的交期能否满足');
       const condition=s.extracted.intent?.evidence.value??'';
-      const intent=s.extracted.intent?.kind as InquiryCase['intent'];
+      const kind=s.extracted.intent?.kind;
+      const intent:InquiryCase['intent']=kind==='inquiry'||kind==='conditional'||kind==='unclear'?kind:'unclear';
       const sourceText=s.sources.find(source=>source.source==='email')?.text??s.sources[0]?.text??'';
       const language=replyLanguage(sourceText,s.extracted.reply?.language);
       const inquiry:InquiryCase={intent,customerText,senderName,
         customer:customerMatches.length===1?customerMatches[0].name:'',lines,condition,requestedDate:value('date'),deliveryAddress:value('address'),needs,replyLanguage:language,responseDraft:''};
-      return {inquiry,customers,issues:[],status:'inquiry-prepared'};
+      return {inquiry,issues:[],status:'inquiry-prepared'};
     })
     .addNode('draftInquiryReply',async s=>{
       const reply=await draftReply(s.inquiry);
@@ -166,9 +173,9 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       }
     })
     .addNode('match',async s=>{
-      const customers=await erp.customers(),items=s.items;
-      const e=s.extracted, issues:Issue[]=[];
+      const e=s.extracted, issues:Issue[]=[...(s.extracted.warnings??[])];
       const value=(f:typeof fields[number])=>e.facts[f][0]?.value??'';
+      const customers=await erp.findCustomers(value('customer')),items=s.items;
       for(const f of fields) if(new Set(e.facts[f].map(x=>normalize(x.value))).size>1) issues.push({code:'SOURCE_CONFLICT',field:f,message:`Email/PDF disagree on ${f}`});
       const matches=customers.filter(c=>normalize(c.customer_name)===normalize(value('customer'))||normalize(c.name)===normalize(value('customer')));
       const customer=matches.length===1?matches[0].name:'';
@@ -216,7 +223,7 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
     })
     .addEdge(START,'extract')
     .addEdge('extract','resolveInventory')
-    .addConditionalEdges('resolveInventory',s=>s.extracted.intent && s.extracted.intent.kind!=='purchase'?'prepareInquiry':'match',['prepareInquiry','match'])
+    .addConditionalEdges('resolveInventory',s=>s.extracted.intent?.kind==='purchase'||(!s.extracted.intent&&!s.extracted.warnings?.some(w=>w.field==='intent'))?'match':'prepareInquiry',['prepareInquiry','match'])
     .addEdge('prepareInquiry','draftInquiryReply')
     .addEdge('draftInquiryReply','inquiryReview')
     .addConditionalEdges('inquiryReview',s=>s.status==='inquiry-review'?'inquiryReview':END,['inquiryReview',END])

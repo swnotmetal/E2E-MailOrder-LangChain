@@ -7,16 +7,16 @@ export const factFields = [...fields, 'sender', 'location'] as const;
 export type FactField = typeof factFields[number];
 export type Evidence = { source: 'email' | 'pdf'; page: number; start: number; end: number; quote: string };
 export type Fact = { value: string; evidence: Evidence };
+export type Issue = { code: string; field: string; message: string };
 export type Source = { source: 'email' | 'pdf'; page: number; text: string };
 export type Extraction = { facts: Record<FactField, Fact[]>; lines: { description: Fact; quantity: Fact; unit: Fact }[];
-  intent?:{kind:'purchase'|'inquiry'|'conditional'|'unclear';evidence:Fact}; reply?:{language:string}; traceId?:string };
+  intent?:{kind:'purchase'|'inquiry'|'conditional'|'unclear';evidence:Fact}; reply?:{language:string}; traceId?:string; warnings?:Issue[] };
 export type Customer = { name: string; customer_name: string };
 export type Item = { name: string; item_name: string; stock_uom: string; disabled?: number };
 export type Address = { name: string; text: string };
-export type Issue = { code: string; field: string; message: string };
 export type InquiryLine = {
   itemText:string; itemCode:string; quantity:string;
-  status:'recorded-stock'|'out-of-stock'|'untracked'|'unresolved'|'lookup-failed';
+  status:'recorded-stock'|'out-of-stock'|'untracked'|'unresolved'|'catalog-miss'|'lookup-failed';
   inventory:{stockTracked:boolean;totalActualQty:number|null}|null;
 };
 export type InquiryCase = {

@@ -15,7 +15,8 @@ test('mail intent is grounded and missing line fields stay unresolved',()=>{
     reply:{language:'en'}};
   const result=verifyMailProposal(raw,sources);
   assert.equal(result.intent?.kind,'conditional');assert.equal(result.facts.sender[0].value,'Mia Example');assert.equal(result.lines[0].quantity.value,'');assert.equal(result.lines[0].unit.value,'');
-  assert.throws(()=>verifyMailProposal({...raw,intentEvidence:span('invented confirmation')},sources),/MODEL_QUOTE_NOT_FOUND/);
+  const unresolved=verifyMailProposal({...raw,intentEvidence:span('invented confirmation')},sources);
+  assert.equal(unresolved.intent,undefined);assert.ok(unresolved.warnings?.some(w=>w.field==='intent'));
   const spaced=verifyMailProposal({...raw,lines:[{description:span('FILTER-A10'),quantity:span('5FILTER-A10','5'),unit:null}]},sources);
   assert.equal(spaced.lines[0].quantity.value,'5');
   assert.equal(spaced.lines[0].quantity.evidence.start,sources[0].text.indexOf('5'));
@@ -30,6 +31,36 @@ test('repeated exact facts remain grounded at a deterministic source offset',()=
   const result=verifyModelProposal({facts:{customer:[],sender:[],location:[],po:[span('PO ABC-1','ABC-1')],date:[],address:[]},lines:[]},repeated);
   assert.equal(result.facts.po[0].value,'ABC-1');
   assert.equal(result.facts.po[0].evidence.start,3);
+});
+test('model-inserted whitespace is mapped back to exact saved source evidence',()=>{
+  const text='Deliver to Bavaria Travel & Adventure GmbHLeopoldstraße 14c80802 München';
+  const mail:Source[]=[{source:'email',page:0,text}];
+  const s=(quote:string,value=quote)=>({sourceIndex:0,quote,value});
+  const raw={intent:'conditional',intentEvidence:s('Bavaria Travel & Adventure GmbH'),facts:{customer:[s('Bavaria Travel & Adventure GmbH')],sender:[],location:[],po:[],date:[],
+    address:[s('Leopoldstraße 14c\n80802 München')]},lines:[],reply:{language:'de'}};
+  const result=verifyMailProposal(raw,mail);
+  assert.equal(result.facts.address[0].value,'Leopoldstraße 14c80802 München');
+  assert.equal(result.facts.address[0].evidence.quote,'Leopoldstraße 14c80802 München');
+  assert.equal(text.slice(result.facts.address[0].evidence.start,result.facts.address[0].evidence.end),result.facts.address[0].value);
+});
+test('a signature postal address is not promoted to a delivery address',()=>{
+  const text='Anlieferung an unser Logistikzentrum in Stuttgart. Mit freundlichen Grüßen Bavaria GmbH Leopoldstraße 14c80802 München Telefon: 123';
+  const mail:Source[]=[{source:'email',page:0,text}];
+  const s=(quote:string,value=quote)=>({sourceIndex:0,quote,value});
+  const raw={intent:'conditional',intentEvidence:s('Anlieferung'),facts:{customer:[s('Bavaria GmbH')],sender:[],location:[s('Stuttgart')],po:[],date:[],address:[s('Leopoldstraße 14c80802 München')]},lines:[],reply:{language:'de'}};
+  const result=verifyMailProposal(raw,mail);
+  assert.deepEqual(result.facts.address,[]);assert.ok(result.warnings?.some(w=>w.code==='UNRESOLVED_ADDRESS_ROLE'));
+});
+test('one ungrounded model field becomes an unresolved warning instead of failing the email',()=>{
+  const text='Acme asks for 5 Filter A10 units.';
+  const mail:Source[]=[{source:'email',page:0,text}];
+  const s=(quote:string,value=quote)=>({sourceIndex:0,quote,value});
+  const raw={intent:'inquiry',intentEvidence:s('asks'),facts:{customer:[s('Acme')],sender:[],location:[],po:[],date:[],address:[s('Acme','Invented address')]},
+    lines:[{description:s('Filter A10'),quantity:s('5'),unit:s('units','piece')}],reply:{language:'en'}};
+  const result=verifyMailProposal(raw,mail);
+  assert.deepEqual(result.facts.address,[]);assert.equal(result.lines[0].unit.value,'');
+  assert.deepEqual(result.warnings?.map(w=>w.field),['address.0','lines.0.unit']);
+  assert.equal(result.intent?.kind,'inquiry');
 });
 test('mail line fields use their closest grounded combination when individual quotes repeat',()=>{
   const text='Sehr geehrte Damen und Herren, wir sind an einigen Ihrer Produkte interessiert. 15x Smart Thermostat V1 10x Filter A20 5x Thermostat X-200 20x Filter. Lieferung bis 15. Oktober 2026. Mit freundlichen Grüßen Lukas Weber, Weber Gebäudetechnik GmbH';

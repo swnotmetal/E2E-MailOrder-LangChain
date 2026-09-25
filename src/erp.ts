@@ -1,5 +1,5 @@
 import { type Customer, type Item, type Address, type Draft, digest, orderKey, normalize } from './domain.js';
-export type ERP = Pick<FrappeERP, 'customers'|'items'|'inventory'|'addresses'|'duplicates'|'createDraft'>;
+export type ERP = Pick<FrappeERP, 'findCustomers'|'findItems'|'inventory'|'addresses'|'duplicates'|'createDraft'>;
 export type Order = {name:string; custom_integration_key?:string; custom_review_digest?:string; docstatus:number; po_no?:string};
 export type Inventory = {itemCode:string; itemName:string; stockTracked:boolean; totalActualQty:number|null; warehouses:{warehouse:string;actualQty:number;projectedQty:number;reservedQty:number}[]};
 
@@ -15,10 +15,11 @@ export class FrappeERP {
     if (!res.ok) throw Error(`ERP_HTTP_${res.status}`) // Do not print server internals or credentials.
     return (await res.json() as {data:T}).data;
   }
-  async list<T>(doctype:string, fields:string[], filters:unknown[]=[]):Promise<T[]> {
+  async list<T>(doctype:string, fields:string[], filters:unknown[]=[],orFilters:unknown[]=[]):Promise<T[]> {
     const rows:T[]=[];
     for(let offset=0; offset<1000; offset+=100) {
       const query = new URLSearchParams({fields:JSON.stringify(fields),filters:JSON.stringify(filters),limit_page_length:'100',limit_start:String(offset)});
+      if(orFilters.length) query.set('or_filters',JSON.stringify(orFilters));
       const page = await this.request<T[]>(`/api/resource/${encodeURIComponent(doctype)}?${query}`);
       rows.push(...page); if(page.length<100) return rows;
     }
@@ -26,6 +27,16 @@ export class FrappeERP {
   }
   customers() {return this.list<Customer>('Customer',['name','customer_name'],[['disabled','=',0]]);}
   items() {return this.list<Item>('Item',['name','item_name','stock_uom','disabled'],[['disabled','=',0],['is_sales_item','=',1]]);}
+  findCustomers(text:string) {
+    return text.trim()?this.list<Customer>('Customer',['name','customer_name'],[['disabled','=',0]],
+      [['name','=',text],['customer_name','=',text]]):Promise.resolve([]);
+  }
+  findItems(text:string) {
+    const tokens=[text,...normalize(text).match(/\b[a-z]+\d+\b/g)??[]].filter(Boolean);
+    const searches=[...new Set(tokens)].flatMap(value=>[['name','like',`%${value}%`],['item_name','like',`%${value}%`]]);
+    return searches.length?this.list<Item>('Item',['name','item_name','stock_uom','disabled'],
+      [['disabled','=',0],['is_sales_item','=',1]],searches):Promise.resolve([]);
+  }
   async inventory(itemCode:string):Promise<Inventory> {
     const items=await this.list<Item&{is_stock_item:number}>('Item',['name','item_name','is_stock_item'],[['name','=',itemCode],['disabled','=',0]]);
     if(items.length!==1) throw Error('ITEM_NOT_FOUND');

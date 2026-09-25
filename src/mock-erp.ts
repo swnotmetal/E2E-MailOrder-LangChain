@@ -58,13 +58,21 @@ export async function mockERP(port=0) {
     };
     let rows=data[doc]??[];
     const filters=JSON.parse(url.searchParams.get('filters')??'[]') as unknown[][];
-    rows=rows.filter(row=>filters.every(filter=>{
-      if(filter.length===3) {const [key,op,value]=filter;return op!=='='||(row as Record<string,unknown>)[String(key)]===value;}
+    const orFilters=JSON.parse(url.searchParams.get('or_filters')??'[]') as unknown[][];
+    const matches=(row:unknown,filter:unknown[])=>{
+      if(filter.length===3) {const [key,op,value]=filter;const actual=(row as Record<string,unknown>)[String(key)];
+        if(op==='=') return actual===value;
+        if(op==='like') return String(actual??'').toLowerCase().includes(String(value).replaceAll('%','').toLowerCase());
+      }
       if(doc==='Address'&&filter.length===4&&filter[0]==='Dynamic Link'&&filter[2]==='=') {
         return filter[1]!=='link_name'||(row as {customer_id?:string}).customer_id===filter[3];
       }
       return true;
-    }));
+    };
+    rows=rows.filter(row=>filters.every(filter=>matches(row,filter))&&(!orFilters.length||orFilters.some(filter=>matches(row,filter))));
+    const start=Number(url.searchParams.get('limit_start')??0),length=Number(url.searchParams.get('limit_page_length')??20);
+    const fields=JSON.parse(url.searchParams.get('fields')??'[]') as string[];
+    rows=rows.slice(start,start+length).map(row=>fields.length?Object.fromEntries(fields.map(field=>[field,(row as Record<string,unknown>)[field]])):row);
     res.end(JSON.stringify({data:rows}));
   });
   await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
