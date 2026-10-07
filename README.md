@@ -13,6 +13,7 @@ It demonstrates:
 - email intake, dedupe, and bounded retry queues;
 - deterministic guardrails before any model call;
 - grounded extraction with source evidence;
+- read-only catalog candidate retrieval ranked by matched terms, with human confirmation for fuzzy descriptions;
 - read-only ERP lookups for customer, catalog, address, inventory, and pricing;
 - LangGraph interrupts, persisted checkpoints, and review/replay recovery;
 - human approval boundaries before ERP Draft writes;

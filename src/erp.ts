@@ -32,7 +32,8 @@ export class FrappeERP {
       [['name','=',text],['customer_name','=',text]]):Promise.resolve([]);
   }
   findItems(text:string) {
-    const tokens=[text,...normalize(text).match(/\b[a-z]+\d+\b/g)??[]].filter(Boolean);
+    if(text.length>500) throw Error('CATALOG_QUERY_LIMIT');
+    const tokens=[...new Set(normalize(text).match(/[\p{L}\p{N}]+/gu)??[])].filter(token=>token.length>1).slice(0,8);
     const searches=[...new Set(tokens)].flatMap(value=>[['name','like',`%${value}%`],['item_name','like',`%${value}%`]]);
     return searches.length?this.list<Item>('Item',['name','item_name','stock_uom','disabled'],
       [['disabled','=',0],['is_sales_item','=',1]],searches):Promise.resolve([]);

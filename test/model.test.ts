@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { geminiExtractor, geminiInquiryReply, geminiInventoryAnswer, inventoryTool, verifyModelProposal, verifyMailProposal } from '../src/model.js';
+import { catalogSearchTool, geminiExtractor, geminiInquiryReply, geminiInventoryAnswer, inventoryTool, verifyModelProposal, verifyMailProposal } from '../src/model.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -110,6 +110,35 @@ test('inventory tool is read-only and preserves unavailable stock as unknown',as
   const result=await inventory.invoke({itemCode:'FILTER-A10'});
   assert.equal(requested,'FILTER-A10');
   assert.deepEqual(result,{itemCode:'FILTER-A10',itemName:'Filter A10',stockTracked:false,totalActualQty:null,warehouses:[]});
+});
+test('catalog search tool ranks and explains lexical ERP candidates without selecting one',async()=>{
+  let requested='';
+  const catalog=catalogSearchTool({findItems:async(query:string)=>{
+    requested=query;
+    return [
+      {name:'FILTER-A10',item_name:'Filter A10',stock_uom:'Nos'},
+      {name:'FILTER-A20',item_name:'Premium Filter A20',stock_uom:'Nos'}
+    ];
+  }});
+  const result=await catalog.invoke({query:'premium filter'});
+  assert.equal(requested,'premium filter');
+  assert.deepEqual(result.map(({name,score,matchedTerms})=>({name,score,matchedTerms})),[
+    {name:'FILTER-A20',score:2,matchedTerms:['premium','filter']},
+    {name:'FILTER-A10',score:1,matchedTerms:['filter']}
+  ]);
+});
+test('catalog search ignores order quantities but preserves explicit model identifiers',async()=>{
+  const items=[
+    {name:'THERM-B1',item_name:'Thermostat Basic',stock_uom:'Nos'},
+    {name:'THERM-P1',item_name:'Thermostat Pro',stock_uom:'Nos'},
+    {name:'THERM-S1',item_name:'Smart Thermostat V1',stock_uom:'Nos'},
+    {name:'FILTER-A10',item_name:'Filter A10',stock_uom:'Nos'},
+    {name:'FILTER-A20',item_name:'Filter A20',stock_uom:'Nos'}
+  ];
+  const catalog=catalogSearchTool({findItems:async()=>items});
+  assert.deepEqual((await catalog.invoke({query:'5 Smart Thermostat'})).map(item=>item.name),['THERM-S1','THERM-B1','THERM-P1']);
+  assert.deepEqual((await catalog.invoke({query:'Filter A10'})).map(item=>item.name),['FILTER-A10']);
+  assert.deepEqual(await catalog.invoke({query:'Thermostat X-200'}),[]);
 });
 test('Gemini drafts an inquiry reply from structured ERP results in the requested language',async(t)=>{
   const dir=await mkdtemp(join(tmpdir(),'gemini-reply-'));

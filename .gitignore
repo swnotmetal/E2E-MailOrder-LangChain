@@ -19,3 +19,6 @@ Thumbs.db
 # Miko local session state
 .miko/state/
 __pycache__/
+.aider*
+ai.ps1
+review.ps1

@@ -150,7 +150,7 @@ function renderForm(){
   }
   for(const [key,title] of [['customer','客户编码'],['po','采购单号 PO'],['date','交付日期'],['address','收货地址编码']])field(title,draft[key],null,v=>draft[key]=v);
   for(const [index,line] of draft.lines.entries()){
-    field('商品 '+(index+1),line.item,[['','请选择确认后的商品'],...(current.values.items??[]).map(i=>[i.name,i.item_name+' · '+i.name])],v=>{line.item=v;line.unit=current.values.items.find(i=>i.name===v)?.stock_uom??line.unit;});
+    field('商品 '+(index+1),line.item,[['','请选择确认后的商品'],...(current.values.items??[]).map(i=>[i.name,i.item_name+' · '+i.name+(i.matchedTerms?.length?' · 命中 '+i.matchedTerms.join(', '):'')])],v=>{line.item=v;line.unit=current.values.items.find(i=>i.name===v)?.stock_uom??line.unit;});
     field('数量',line.quantity,null,v=>line.quantity=v);field('单位',line.unit,null,v=>line.unit=v);
   }
   if(current.pending.length){const add=document.createElement('button');add.textContent='补充商品行';add.onclick=()=>{draft.lines.push({description:'',item:'',quantity:'',unit:''});$('draft').value=pretty(draft);renderForm();edited();};root.append(add);}

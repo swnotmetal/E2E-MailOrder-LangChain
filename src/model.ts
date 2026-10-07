@@ -5,7 +5,7 @@ import { tool } from '@langchain/core/tools';
 import { Client, RunTree } from 'langsmith';
 import { getCurrentRunTree } from 'langsmith/traceable';
 import { z } from 'zod';
-import { type Extraction, type Fact, type InquiryCase, type Source } from './domain.js';
+import { type Extraction, type Fact, type InquiryCase, type Item, type Source, normalize } from './domain.js';
 import { type FrappeERP, type Inventory } from './erp.js';
 import { verifyEvidence } from './input.js';
 
@@ -40,6 +40,30 @@ const inventoryInput=z.object({itemCode:z.string().trim().min(1).max(140)}).stri
 export function inventoryTool(erp:Pick<FrappeERP,'inventory'>) {
   return tool(({itemCode})=>erp.inventory(itemCode),{
     name:'get_inventory',description:'Read current ERPNext inventory for one exact item code. This tool never writes to ERP.',schema:inventoryInput
+  });
+}
+
+const catalogSearchInput=z.object({query:z.string().trim().min(1).max(500)}).strict();
+export type CatalogCandidate=Item&{score:number;matchedTerms:string[]};
+export function catalogSearchTool(erp:Pick<FrappeERP,'findItems'>) {
+  return tool(async({query})=>{
+    const terms=[...new Set(normalize(query).match(/[\p{L}\p{N}]+/gu)??[])];
+    const identifiers=(text:string)=>[...text.matchAll(/[\p{L}]+-?\p{N}+/gu)].map(([term])=>term.replaceAll('-',''));
+    const queryIdentifiers=identifiers(normalize(query));
+    const candidates=await erp.findItems(query);
+    const ranked=candidates.map(item=>{
+      const normalizedItem=normalize(`${item.name} ${item.item_name}`);
+      const itemTerms=new Set(normalizedItem.match(/[\p{L}\p{N}]+/gu)??[]);
+      const matchedTerms=terms.filter(term=>itemTerms.has(term));
+      return {candidate:{...item,score:matchedTerms.length,matchedTerms} satisfies CatalogCandidate,itemIdentifiers:identifiers(normalizedItem)};
+    });
+    return ranked.filter(({candidate,itemIdentifiers})=>candidate.score>0
+      &&(!queryIdentifiers.length||queryIdentifiers.some(term=>itemIdentifiers.includes(term))))
+      .map(({candidate})=>candidate).sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name));
+  },{
+    name:'search_catalog_candidates',
+    description:'Find read-only ERP catalog candidates using lexical term overlap. Score is the matched-term count; ranking is only a hint and never confirms a SKU.',
+    schema:catalogSearchInput
   });
 }
 

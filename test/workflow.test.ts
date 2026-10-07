@@ -122,6 +122,19 @@ test('fixture-backed ERP isolates addresses, stock states and historical custome
     assert.equal((await x.erp.duplicates(history)).length,1);
   }finally{await x.close();}
 });
+test('catalog queries have bounded terms and reject oversized descriptions',async t=>{
+  const erp=new FrappeERP('http://127.0.0.1:3211','token test:test','Nordic Parts Demo');
+  let requestedUrl='';
+  t.mock.method(globalThis,'fetch',async(url:unknown)=>{
+    requestedUrl=String(url);
+    return Response.json({data:[]});
+  });
+  const query=Array.from({length:30},(_,index)=>`term${index}`).join(' ');
+  await erp.findItems(query);
+  const orFilters=JSON.parse(new URL(requestedUrl).searchParams.get('or_filters')??'[]');
+  assert.equal(orFilters.length,16);
+  assert.throws(()=>erp.findItems('x'.repeat(501)),/CATALOG_QUERY_LIMIT/);
+});
 test('inquiry and conditional intents use reply review without order validation or ERP writes',async()=>{
   for(const kind of ['inquiry','conditional','unclear'] as const){
     const x=await setup();try{
@@ -152,6 +165,23 @@ test('a unique model token maps conversational A10 text without weakening generi
     await graph.invoke({sources:input},config('model-token'));
     const s=await graph.getState(config('model-token'));
     assert.equal(s.values.inquiry.lines[0].itemCode,'FILTER-A10');assert.equal(s.values.status,'inquiry-review');assert.equal(x.mock.posts,0);
+  }finally{await x.close();}
+});
+test('fuzzy catalog candidates are ranked for review but never auto-selected',async()=>{
+  const x=await setup();try{
+    const text='We need 5 Smart Thermostat units.';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const empty={value:'',evidence:{source:'email' as const,page:0,start:0,end:0,quote:''}};
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[],sender:[],location:[],po:[],date:[],address:[]},
+      intent:{kind:'purchase' as const,evidence:fact('need')},lines:[{description:fact('Smart Thermostat'),quantity:fact('5'),unit:empty}]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('fuzzy-catalog'));
+    const state=await graph.getState(config('fuzzy-catalog'));
+    assert.deepEqual(state.values.items.slice(0,3).map((item:any)=>[item.name,item.score,item.matchedTerms]),[
+      ['THERM-S1',2,['smart','thermostat']],['THERM-B1',1,['thermostat']],['THERM-P1',1,['thermostat']]
+    ]);
+    assert.equal(state.values.draft.lines[0].item,'');
+    assert.equal(state.values.availability[0].status,'unresolved');
+    assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });
 test('inquiry fallback reply follows a Chinese customer message',async()=>{

@@ -1,14 +1,14 @@
 import { Annotation, StateGraph, START, END, interrupt } from '@langchain/langgraph';
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { type ERP } from './erp.js';
-import { inventoryTool } from './model.js';
+import { catalogSearchTool, inventoryTool, type CatalogCandidate } from './model.js';
 import { templateExtractor, verifyEvidence, type Extractor } from './input.js';
 import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type Decision, type InquiryCase, type InquiryLine,
   DecisionSchema, InquiryDecisionSchema, validate, normalize, digest, fields } from './domain.js';
 
 const State = Annotation.Root({
   sources:Annotation<Source[]>(), extracted:Annotation<Extraction>(), draft:Annotation<Draft>(),
-  customers:Annotation<Customer[]>(), items:Annotation<Item[]>(), addresses:Annotation<Address[]>(),
+  customers:Annotation<Customer[]>(), items:Annotation<CatalogCandidate[]>(), addresses:Annotation<Address[]>(),
   availability:Annotation<InquiryLine[]>(),
   issues:Annotation<Issue[]>(), status:Annotation<string>(), revision:Annotation<string>(),
   decision:Annotation<unknown>(), inquiry:Annotation<InquiryCase>(), order:Annotation<string>(),
@@ -92,12 +92,18 @@ const templateReplyDrafter:InquiryReplyDrafter=async inquiry=>({
 
 export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor, draftReply:InquiryReplyDrafter=templateReplyDrafter) {
   const inventoryReader=inventoryTool(erp);
+  const catalogSearch=catalogSearchTool(erp);
   async function resolveAvailability(extracted:Extraction) {
     const email=extracted.lines.filter(line=>line.description.evidence.source==='email');
     const pdf=extracted.lines.filter(line=>line.description.evidence.source==='pdf');
     const selected=extracted.intent?.kind==='purchase'?(pdf.length?pdf:email):(email.length?email:extracted.lines);
-    const candidates=await Promise.all(selected.map(line=>erp.findItems(line.description.value)));
-    const items=[...new Map(candidates.flat().map(item=>[item.name,item])).values()];
+    const candidates=await Promise.all(selected.map(line=>catalogSearch.invoke({query:line.description.value})));
+    const byName=new Map<string,CatalogCandidate>();
+    for(const item of candidates.flat()) {
+      const previous=byName.get(item.name);
+      if(!previous||item.score>previous.score) byName.set(item.name,item);
+    }
+    const items=[...byName.values()].sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name));
     const availability=await Promise.all(selected.map(async (line,index)=>{
       const itemText=line.description.value;
       const itemMatches=matchingItems(candidates[index],itemText);
