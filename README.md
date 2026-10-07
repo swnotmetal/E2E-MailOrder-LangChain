@@ -4,18 +4,70 @@ An open-source learning and engineering portfolio project for reviewing B2B orde
 
 All examples and fixture records are fictional. The project deliberately has no vector database or multi-agent workflow. Every live model path uses only `gemini-2.5-flash-lite` through the shared entry point in `src/model.ts`; deterministic tests make no model calls.
 
-## What this demonstrates
+## What this project is
 
-- natural-language email extraction with source evidence;
-- order-versus-inquiry routing and same-language draft replies;
-- read-only customer, catalog, address, inventory, and pricing tools;
-- LangGraph interrupts, persisted checkpoints, revision-bound approval, and recovery;
-- deterministic validation before any ERP side effect;
-- ERP Draft creation behind a human approval boundary;
-- idempotency and reconciliation after uncertain writes;
-- explicit separation of mock tests, live integration evidence, and unverified claims.
+This project is a learning and engineering portfolio demo for a human-in-the-loop order-review workflow. It is not a production spam filter, a general inbox security product, or a fully autonomous order agent.
 
-Current evidence: a local ERPNext instance has previously completed human-approved Draft creation and duplicate-order checks. A fictional inquiry has also produced one complete LangSmith LangGraph trace containing Gemini extraction, two read-only inventory Tool spans, grounded reply drafting, and the human-review interrupt. The approved reply was read back as LangSmith feedback on that root run. See [verification notes](docs/verification.md) and [model notes](docs/model.md) for the precise evidence status.
+It demonstrates:
+
+- email intake, dedupe, and bounded retry queues;
+- deterministic guardrails before any model call;
+- grounded extraction with source evidence;
+- read-only ERP lookups for customer, catalog, address, inventory, and pricing;
+- LangGraph interrupts, persisted checkpoints, and review/replay recovery;
+- human approval boundaries before ERP Draft writes;
+- explicit audit, reconciliation, and benchmark reporting on fictional data.
+
+## Flow
+
+```mermaid
+flowchart LR
+  A[Webhook / mailbox] --> B[dedupe + queue]
+  B --> C[deterministic admit gate]
+  C -->|accept| D[extract + verify evidence]
+  C -->|drop| E[discard / dead-letter]
+  C -->|throttle| F[retry later]
+  D --> G[validate + match ERP data]
+  G --> H[human review / interrupt]
+  H --> I[approve / reject / request info]
+  I --> J[ERP draft write]
+  J --> K[audit trail + checkpoint recovery]
+```
+
+## Scope and non-goals
+
+The benchmark here is workflow correctness, evidence traceability, and operational boundaries, not spam classification coverage.
+
+This project intentionally does not claim:
+
+- universal junk-email detection;
+- production-grade inbox security;
+- model autonomy over ERP writes;
+- zero false positives or zero false negatives in real-world mail traffic.
+
+The gate is narrow by design: it rejects only clearly malformed, flagged, automated, or rate-limited messages before model work begins. The rest continue into human review so the system can demonstrate real orchestration behaviors.
+
+## Fast start
+
+```powershell
+npm ci
+npm run check
+npm test
+npm run learn
+```
+
+Then open http://127.0.0.1:3210 for the local learning UI. See [docs/learning-guide.md](docs/learning-guide.md) for the Chinese-first walkthrough.
+
+## Evidence and benchmarks
+
+Current evidence is explicitly bounded and fictional:
+
+- local ERPNext-compatible mock runs for human-approved Draft creation and duplicate checks;
+- a LangSmith trace exists for one fictional inquiry flow with extraction, read-only inventory tools, grounded drafting, and interrupt-based review;
+- deterministic benchmarks and gold fixtures are kept separate from live model output;
+- all unverified claims remain labeled as such in the docs and verification notes.
+
+See [docs/verification.md](docs/verification.md), [docs/evaluation.md](docs/evaluation.md), and [docs/model.md](docs/model.md) for the precise boundaries.
 
 ## Quick start
 

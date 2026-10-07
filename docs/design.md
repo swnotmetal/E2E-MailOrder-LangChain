@@ -1,7 +1,9 @@
 # 第一版业务边界
 
-虚构公司 Nordic Parts Demo，经销设备配件。首版：一张 PO、一位客户、一个交货地址、逐行整件采购。无 OCR、复杂 MIME、税务、折扣、库存承诺或正式提交。
+这不是一个 spam filter；它是一个流程编排展示项目。虚构公司 Nordic Parts Demo，经销设备配件。首版：一张 PO、一位客户、一个交货地址、逐行整件采购。无 OCR、复杂 MIME、税务、折扣、库存承诺或正式提交。
 字段：客户、PO 编号、商品描述/明确型号、正整数数量、ERP 单位、ISO 交付日期和地址。证据保存 source、page、quote、start/end。冲突不自动选择正文或附件。ERP ID 不由模型创造；单价和最终金额由 ERP 计算。
+
+流程边界是明确的：收件入口做去重和入队，确定性闸门只处理明显坏消息和速率限制；其余内容进入 extract → validate → review → write 的工作流。这个项目的 benchmark 是工作流结构、恢复能力、审计与审批边界，而不是“把所有垃圾邮件都正确识别出来”。
 
 流程：import → extract → match/check → review（interrupt）→ approve → revalidate → write → created。reject → rejected；request-info → needs-info（可再次审核）。SQLite checkpoint 跨进程恢复。批准含 revision、操作者、修改和冲突解决理由，修改后重新校验。
 
@@ -9,6 +11,7 @@
 
 CLI 限本机操作者使用，不宣称多用户鉴权。审核 JSON 可编辑。模板解析器只接受标签行，不冒充自由文本理解。模型以 Extractor 函数替换，默认零模型调用。
 
+重点是：这不是“AI 直接处理所有 inbox”，而是“AI 只在受控边界内处理有结构的流程”。
 ## 开发样例，预期答案需用户核对
 
 | ID | 变化 | 暂定行为 |
