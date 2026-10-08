@@ -1,21 +1,21 @@
 # B2B Email Order Review Lab
 
-An open-source learning and engineering portfolio project for reviewing B2B order emails with TypeScript, LangChain, LangGraph, LangSmith, SQLite, and ERPNext-compatible APIs.
+An open-source, consulting-oriented IT engineering portfolio: a bounded B2B email-to-ERP workflow that demonstrates how business requirements become traceable, human-controlled software using TypeScript, LangChain, LangGraph, LangSmith, SQLite, and ERPNext-compatible APIs.
 
 All examples and fixture records are fictional. The project deliberately has no vector database or multi-agent workflow. Every live model path uses only `gemini-2.5-flash-lite` through the shared entry point in `src/model.ts`; deterministic tests make no model calls.
 
 ## What this project is
 
-This project is a learning and engineering portfolio demo for a human-in-the-loop order-review workflow. It is not a production spam filter, a general inbox security product, or a fully autonomous order agent.
+This project uses a fictional order-review process to demonstrate consulting-relevant engineering judgment: defining scope, preserving evidence, constraining model and tool authority, and making review and recovery observable. It is not a production spam filter, a general inbox security product, or a fully autonomous order agent.
 
 It demonstrates:
 
-- email intake, dedupe, and bounded retry queues;
-- deterministic guardrails before any model call;
+- email and text-PDF intake through the CLI and learning lab;
 - grounded extraction with source evidence;
 - read-only catalog candidate retrieval ranked by matched terms, with human confirmation for fuzzy descriptions;
 - read-only ERP lookups for customer, catalog, address, inventory, and pricing;
 - LangGraph interrupts, persisted checkpoints, and review/replay recovery;
+- deterministic validation before order writes;
 - human approval boundaries before ERP Draft writes;
 - explicit audit, reconciliation, and benchmark reporting on fictional data.
 
@@ -23,21 +23,23 @@ It demonstrates:
 
 ```mermaid
 flowchart LR
-  A[Webhook / mailbox] --> B[dedupe + queue]
-  B --> C[deterministic admit gate]
-  C -->|accept| D[extract + verify evidence]
-  C -->|drop| E[discard / dead-letter]
-  C -->|throttle| F[retry later]
-  D --> G[validate + match ERP data]
-  G --> H[human review / interrupt]
-  H --> I[approve / reject / request info]
-  I --> J[ERP draft write]
-  J --> K[audit trail + checkpoint recovery]
+  A[Email + text PDF] --> B[Grounded extraction + evidence check]
+  B --> C[Read-only catalog and inventory lookup]
+  C --> D{Intent}
+  D -->|purchase| E[Validate order against ERP]
+  D -->|inquiry / conditional / unclear| F[Prepare reviewed reply]
+  E --> G[Human review interrupt]
+  F --> G
+  G --> H{Human decision}
+  H -->|approve order| I[Revalidate + create ERP Draft]
+  H -->|approve reply| J[Record approval; no email sent]
+  H -->|request info / reject| K[Keep in review / close]
+  L[(SQLite checkpoints)] -. resume .-> G
 ```
 
 ## Scope and non-goals
 
-The benchmark here is workflow correctness, evidence traceability, and operational boundaries, not spam classification coverage.
+The benchmark here is workflow correctness, evidence traceability, and operational boundaries, not spam classification coverage. The current application does not include an inbound webhook service or durable queue.
 
 This project intentionally does not claim:
 
@@ -46,7 +48,7 @@ This project intentionally does not claim:
 - model autonomy over ERP writes;
 - zero false positives or zero false negatives in real-world mail traffic.
 
-The gate is narrow by design: it rejects only clearly malformed, flagged, automated, or rate-limited messages before model work begins. The rest continue into human review so the system can demonstrate real orchestration behaviors.
+The workflow validates extracted evidence and order constraints, then requires human review before an ERP Draft write. It does not claim to classify spam or provide inbox security; suspicious or irrelevant mail handling is outside the current implementation.
 
 ## Fast start
 
