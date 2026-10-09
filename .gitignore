@@ -22,3 +22,8 @@ __pycache__/
 .aider*
 ai.ps1
 review.ps1
+experiments/kev-finnish-poc/ScandiSent/
+experiments/kev-finnish-poc/ScandiSent.zip
+experiments/kev-finnish-poc/finsen-v1-1-src/
+experiments/kev-finnish-poc/finsen-v1-1-src.zip
+experiments/kev-finnish-poc/__MACOSX/

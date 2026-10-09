@@ -71,6 +71,7 @@ Current evidence is explicitly bounded and fictional:
 - all unverified claims remain labeled as such in the docs and verification notes.
 
 See [docs/verification.md](docs/verification.md), [docs/evaluation.md](docs/evaluation.md), and [docs/model.md](docs/model.md) for the precise boundaries.
+The isolated Finnish KEV experiment was paused without runtime integration; its measured scope and limitations are recorded in [one short experiment note](experiments/kev-finnish-poc/README.md).
 
 ## Quick start
 

@@ -4,6 +4,8 @@
 
 `fixtures/evaluation/multilingual-inquiries.json` 保存 9 封经用户确认的虚构邮件：原有英、德、爱沙尼亚、芬兰四例，加上 2026-09-24 确认的五封英文候选。这里的 gold / reference output 是“人已同意、供 evaluator 判分的预期答案”，不是模型生成答案，也不宣称它是脱离当前任务定义的绝对真理。reference outputs 覆盖可由原文人工核对的语言、意图、公司、发件人、日期、商品描述和数量；新五例还明确标注 PO 与可用于 ERP 的送货地址。它不包含 ERP 匹配、价格、库存或回复文案。
 
+Fixture schema intentionally permits case-level omissions: `language`, `intent`, `customer`, `sender`, `date`, and `lines` are required; `po` and `address` are optional and scored only when present. `historical` is also optional and records an observed prior result, including errors; it is not the gold label. For example, `helsinki-fi.expected.intent` is the human-reviewed `inquiry`, while its historical `conditional` is a prior model disagreement, not a conflicting reference.
+
 运行方式：
 
 ```powershell
