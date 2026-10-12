@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { Command } from '@langchain/langgraph';
@@ -9,9 +9,10 @@ import { mockERP } from '../src/mock-erp.js';
 import { FrappeERP } from '../src/erp.js';
 import { workflow } from '../src/workflow.js';
 import { readSources } from '../src/input.js';
-import { DecisionSchema, InquiryDecisionSchema, type Decision, type InquiryDecision } from '../src/domain.js';
+import { DecisionSchema, InquiryDecisionSchema, type Decision, type InquiryDecision, type Source } from '../src/domain.js';
 import { inventoryTool, geminiInquiryReply, geminiMailExtractor, recordHumanReviewFeedback } from '../src/model.js';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 
 export async function startLearningLab(port=3210) {
   const traceProject=process.env.LEARN_LANGSMITH_PROJECT?.trim()||process.env.LANGSMITH_PROJECT?.trim()||'order-review-mailbox-ui';
@@ -42,7 +43,42 @@ export async function startLearningLab(port=3210) {
   const threads=new Set<string>();
   const mailbox=new Map<string,{subject:string;events:unknown[];error?:string}>();
   const inventory=inventoryTool(erp);
+  // Matches the in-memory inbox: a restart re-loads whatever Mailpit still holds.
+  const seenMailpit=new Set<string>();
   let busy=false;
+  // Shared by /api/ingest and /api/mailpit: decode raw MIME into sources, then run the graph.
+  async function ingestRaw(subject:string,bytes:Buffer,useModel:boolean) {
+    if(bytes.length>2*1024*1024) throw Error('INPUT_TOO_LARGE');
+    const dir=await mkdtemp(join(tmpdir(),'mailbox-ingest-'));
+    let sources:Source[];
+    try {const file=join(dir,'message.eml');await writeFile(file,bytes);sources=await readSources(file);}
+    finally {await rm(dir,{recursive:true,force:true});}
+    const id=randomUUID();threads.add(id);const events:unknown[]=[];mailbox.set(id,{subject,events});
+    try {
+      if(useModel) {try{process.loadEnvFile('.env');}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}configureTracing();}
+      for await(const event of await (useModel?modelGraph:graph).stream({sources},{configurable:{thread_id:id},streamMode:'updates',
+        runName:`mailbox · ${subject}`,tags:['fictional-email','learning-lab','smtp-mailpit','source:mailpit'],metadata:{thread_id:id,subject,sourceSystem:'mailpit'}})) events.push(event);
+    } catch(error) {mailbox.get(id)!.error=error instanceof Error?error.message:'Unknown error';}
+    return id;
+  }
+  // A real deployment watches its mailbox; so does this one. Set LEARN_MAILPIT=off to disable.
+  const mailpitBase=process.env.MAILPIT_HTTP?.trim()||'http://127.0.0.1:8025';
+  const mailpitUsesModel=process.env.LEARN_MAILPIT_MODE?.trim().toLowerCase()==='gemini';
+  if(process.env.LEARN_MAILPIT?.trim().toLowerCase()!=='off') {
+    setInterval(async()=>{
+      if(busy) return;
+      try {
+        const listing=await (await fetch(`${mailpitBase}/api/v1/messages`)).json() as {messages:{ID:string;Subject:string}[]};
+        for(const message of listing.messages) {
+          if(seenMailpit.has(message.ID)) continue;
+          const raw=Buffer.from(await (await fetch(`${mailpitBase}/api/v1/message/${message.ID}/raw`)).arrayBuffer());
+          await ingestRaw(message.Subject,raw,false);
+          seenMailpit.add(message.ID);
+          console.log(`Mailpit: ingested "${message.Subject}"`);
+        }
+      } catch { /* Mailpit not running is not an error. */ }
+    },3000).unref();
+  }
   const server=createServer(async(req,res)=>{
     const host=`127.0.0.1:${(server.address() as {port:number}).port}`;
     res.setHeader('Content-Type','application/json; charset=utf-8');
@@ -56,12 +92,14 @@ export async function startLearningLab(port=3210) {
         res.setHeader('Content-Type','text/html; charset=utf-8');
         res.end(await readFile(new URL('../src/learn.html',import.meta.url)));return;
       }
-      if(req.method!=='POST' || !['/api/start','/api/send','/api/inbox','/api/template','/api/decide','/api/state','/api/tool','/api/reset'].includes(req.url??'')) {
+      if(req.method!=='POST' || !['/api/start','/api/send','/api/ingest','/api/mailpit','/api/inbox','/api/template','/api/decide','/api/state','/api/tool','/api/reset'].includes(req.url??'')) {
         res.writeHead(404).end('{}');return;
       }
       if(!req.headers['content-type']?.startsWith('application/json')) throw Error('JSON_REQUIRED');
       const chunks:Buffer[]=[];let size=0;
-      for await(const chunk of req) {size+=chunk.length;if(size>32768) throw Error('INPUT_TOO_LARGE');chunks.push(chunk);}
+      // Only the mailbox ingest endpoint accepts a real MIME message, so it gets its own budget.
+      const limit=req.url==='/api/ingest'?4*1024*1024:32768;
+      for await(const chunk of req) {size+=chunk.length;if(size>limit) throw Error('INPUT_TOO_LARGE');chunks.push(chunk);}
       const input=JSON.parse(Buffer.concat(chunks).toString());
       if(busy) {res.writeHead(409).end(JSON.stringify({error:'LAB_BUSY'}));return;}
       busy=true;
@@ -83,9 +121,23 @@ export async function startLearningLab(port=3210) {
           const output=await inventory.invoke(input);
           res.end(JSON.stringify({mode:'MOCK inventory / real LangChain tool / no model',schema:z.toJSONSchema(inventory.schema),input,output}));return;
         }
+        if(req.url==='/api/mailpit') {
+          const base=process.env.MAILPIT_HTTP?.trim()||'http://127.0.0.1:8025';
+          let listing:{messages:{ID:string;Subject:string}[]};
+          try {listing=await (await fetch(`${base}/api/v1/messages`)).json() as {messages:{ID:string;Subject:string}[]};}
+          catch {throw Error('MAILPIT_UNAVAILABLE: start it with infra/start-mailpit.ps1');}
+          const pulled:string[]=[];
+          for(const message of listing.messages) {
+            if(seenMailpit.has(message.ID)) continue;
+            const raw=Buffer.from(await (await fetch(`${base}/api/v1/message/${message.ID}/raw`)).arrayBuffer());
+            await ingestRaw(message.Subject,raw,false);
+            seenMailpit.add(message.ID);pulled.push(message.Subject);
+          }
+          res.end(JSON.stringify({pulled}));return;
+        }
         if(req.url==='/api/reset') {
           await resetMock();threads.clear();mailbox.clear();
-          res.end(JSON.stringify({reset:true,mockWrites:0,message:'练习数据已清空'}));return;
+          res.end(JSON.stringify({reset:true,mockWrites:0,message:'Practice data cleared'}));return;
         }
         let id:string, humanDecision:Decision|InquiryDecision|undefined;
         let feedback:undefined|{id?:string;error?:string};
@@ -98,6 +150,9 @@ export async function startLearningLab(port=3210) {
             for await(const event of await (mail.mode==='gemini'?modelGraph:graph).stream({sources},{configurable:{thread_id:id},streamMode:'updates',
               runName:`mailbox · ${mail.subject}`,tags:['fictional-email','learning-lab','source:web-ui'],metadata:{thread_id:id,subject:mail.subject,sourceSystem:'web-ui'}})) events.push(event);
           } catch(error) {mailbox.get(id)!.error=error instanceof Error?error.message:'Unknown error';}
+        } else if(req.url==='/api/ingest') {
+          const mail=z.object({subject:z.string().trim().min(1).max(200),raw:z.string().min(1),mode:z.enum(['template','gemini']).default('template')}).parse(input);
+          id=await ingestRaw(mail.subject,Buffer.from(mail.raw,'base64'),mail.mode==='gemini');
         } else if(req.url==='/api/start') {
           const {fixture}=z.object({fixture:z.enum(['01-clean','02-ambiguous','03-quantity-conflict'])}).parse(input);
           await resetMock();threads.clear();mailbox.clear();

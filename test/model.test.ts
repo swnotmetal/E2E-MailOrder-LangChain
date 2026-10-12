@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { catalogSearchTool, geminiExtractor, geminiInquiryReply, geminiInventoryAnswer, inventoryTool, verifyModelProposal, verifyMailProposal } from '../src/model.js';
+import { catalogSearchTool, geminiExtractor, geminiInquiryReply, geminiInventoryAnswer, geminiMailExtractor, inventoryTool, verifyModelProposal, verifyMailProposal } from '../src/model.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -154,16 +154,42 @@ test('Gemini drafts an inquiry reply from structured ERP results in the requeste
     const input=JSON.parse(body.contents[0].parts[0].text);
     assert.equal(input.language,'fi');assert.equal(input.requestedDate,'15. lokakuuta 2026');assert.equal(input.deliveryAddress,'Testikatu 1, Helsinki');
     assert.equal(input.lines[0].availability,'requested-quantity-not-currently-confirmed');assert.equal('inventory' in input.lines[0],false);assert.equal('itemCode' in input.lines[0],false);
+    assert.equal(input.lines[1].availability,'not-in-our-catalog');
+    const instruction=body.systemInstruction.parts[0].text;
+    assert.match(instruction,/not-in-our-catalog means our own catalogue holds no matching product/);
+    assert.match(instruction,/you must not ask the customer for its model, variant, specification or manufacturer reference/);
+    assert.match(instruction,/needs-identification is the only case where you may ask the customer for identifying details/);
+    assert.match(instruction,/Do not repeat the postal delivery address in the reply/);
     return Response.json({candidates:[{content:{parts:[{functionCall:{name:'draft_inquiry_reply',args:{draft:'Hei Matti,\n\nEmme voi vielä vahvistaa pyydettyä FILTER-A20-määrää. Selvitämme täydennystä ja vaihtoehtoja. Lähetämme hinnan ja toimitusarvion yhtenä tarjouksena.\n\nYstävällisin terveisin,\nMyyntitiimi'}}}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:30}});
   });
   const inquiry:InquiryCase={intent:'inquiry',customerText:'Fictional Oy',senderName:'Matti',customer:'',condition:'saatavuutta',requestedDate:'15. lokakuuta 2026',deliveryAddress:'Testikatu 1, Helsinki',
-    lines:[{itemText:'Filter A20',itemCode:'FILTER-A20',quantity:'10',status:'out-of-stock',inventory:{stockTracked:true,totalActualQty:0}}],
-    needs:['确认适用价格','确认客户要求的交期能否满足'],replyLanguage:'fi',responseDraft:''};
+    lines:[{itemText:'Filter A20',itemCode:'FILTER-A20',quantity:'10',status:'out-of-stock',inventory:{stockTracked:true,totalActualQty:0}},
+      {itemText:'Filter X200',itemCode:'',quantity:'5',status:'catalog-miss',inventory:null}],
+    needs:['Confirm the applicable price','Confirm whether the requested lead time can be met'],replyLanguage:'fi',responseDraft:''};
   try {
     const result=await geminiInquiryReply(dir)(inquiry);
     assert.equal(requests,1);assert.equal(result.language,'fi');assert.equal(result.model,'gemini-2.5-flash-lite');assert.match(result.draft,/Hei Matti/);
     const ledger=SqliteSaver.fromConnString(join(dir,'model-budget.sqlite'));
     try {assert.equal((ledger.db.prepare('SELECT count(*) AS count FROM model_budget').get() as {count:number}).count,1);} finally {ledger.db.close();}
+  } finally {
+    if(originalKey===undefined) delete process.env.GOOGLE_API_KEY; else process.env.GOOGLE_API_KEY=originalKey;
+    if(originalTrace===undefined) delete process.env.ORDER_TRACE; else process.env.ORDER_TRACE=originalTrace;
+    await rm(dir,{recursive:true,force:true});
+  }
+});
+test('mail instruction requires relative delivery dates to be copied verbatim',async(t)=>{
+  const dir=await mkdtemp(join(tmpdir(),'gemini-date-'));
+  const originalKey=process.env.GOOGLE_API_KEY, originalTrace=process.env.ORDER_TRACE;
+  process.env.GOOGLE_API_KEY='fictional-test-key';process.env.ORDER_TRACE='false';
+  let instruction='';
+  t.mock.method(globalThis,'fetch',async(url:unknown,init:RequestInit)=>{
+    instruction=(JSON.parse(init.body as string) as {systemInstruction:{parts:{text:string}[]}}).systemInstruction.parts[0].text;
+    return Response.json({candidates:[{content:{parts:[]}}]});
+  });
+  try {
+    await assert.rejects(geminiMailExtractor(dir)([{source:'email',page:0,text:'Fictional email'}]));
+    assert.match(instruction,/copy it verbatim into date even when it is relative/);
+    assert.match(instruction,/leave date empty only when no delivery timing is stated anywhere in the source/);
   } finally {
     if(originalKey===undefined) delete process.env.GOOGLE_API_KEY; else process.env.GOOGLE_API_KEY=originalKey;
     if(originalTrace===undefined) delete process.env.ORDER_TRACE; else process.env.ORDER_TRACE=originalTrace;

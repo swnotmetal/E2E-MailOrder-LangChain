@@ -78,16 +78,16 @@ function inventoryText(line:InquiryLine,language:string) {
   return `${item}: for the requested quantity of ${qty}, please share the model, variant, specification, manufacturer reference or any other identifying details so we can confirm the exact product.`;
 }
 
-function draftInquiryReply(senderName:string,lines:InquiryLine[],language:string,requestedDate:string,deliveryAddress:string) {
+function draftInquiryReply(senderName:string,lines:InquiryLine[],language:string,requestedDate:string) {
   const details=lines.map(line=>`- ${inventoryText(line,language)}`).join('\n');
-  if(language==='zh') return `您好${senderName?`，${senderName}`:''}：\n\n感谢您的询价。以下是我们目前正在核实的情况：\n\n${details}\n\n我们会在正式报价中一并提供价格，并确认${[requestedDate,deliveryAddress].filter(Boolean).join('，')||'您要求的交付安排'}是否可行。在正式确认前，库存尚未预留。\n\n此致\n销售团队`;
-  if(language==='de') return `Guten Tag${senderName?` ${senderName}`:''},\n\nvielen Dank für Ihre Anfrage. Wir prüfen derzeit Folgendes:\n\n${details}\n\nUnser zusammengefasstes Angebot enthält die Preise und bestätigt, ob ${[requestedDate,deliveryAddress].filter(Boolean).join(' / ')||'die gewünschte Lieferung'} möglich ist. Bis zur Bestätigung ist keine Ware reserviert.\n\nMit freundlichen Grüßen\nVertriebsteam`;
-  if(language==='et') return `Tere${senderName?` ${senderName}`:''},\n\ntäname päringu eest. Kontrollime praegu järgmist:\n\n${details}\n\nKoondpakkumises esitame hinnad ja kinnitame, kas ${[requestedDate,deliveryAddress].filter(Boolean).join(' / ')||'soovitud tarne'} on võimalik. Kuni kinnitamiseni ei ole kaup broneeritud.\n\nLugupidamisega\nMüügimeeskond`;
-  return `Hello${senderName?` ${senderName}`:''},\n\nThank you for your inquiry. We are currently checking the following:\n\n${details}\n\nOur consolidated quotation will include pricing and confirm whether ${[requestedDate,deliveryAddress].filter(Boolean).join(' to ')||'the requested delivery'} is feasible. No stock is reserved until we confirm it.\n\nBest regards,\nSales team`;
+  if(language==='zh') return `您好${senderName?`，${senderName}`:''}：\n\n感谢您的询价。以下是我们目前正在核实的情况：\n\n${details}\n\n我们会在正式报价中一并提供价格，并确认${requestedDate||'您要求的交付安排'}是否可行，同时核对您提供的送货地址。在正式确认前，库存尚未预留。\n\n此致\n销售团队`;
+  if(language==='de') return `Guten Tag${senderName?` ${senderName}`:''},\n\nvielen Dank für Ihre Anfrage. Wir prüfen derzeit Folgendes:\n\n${details}\n\nUnser zusammengefasstes Angebot enthält die Preise, bestätigt, ob ${requestedDate||'die gewünschte Lieferung'} möglich ist, und prüft die von Ihnen angegebene Lieferadresse. Bis zur Bestätigung ist keine Ware reserviert.\n\nMit freundlichen Grüßen\nVertriebsteam`;
+  if(language==='et') return `Tere${senderName?` ${senderName}`:''},\n\ntäname päringu eest. Kontrollime praegu järgmist:\n\n${details}\n\nKoondpakkumises esitame hinnad, kinnitame, kas ${requestedDate||'soovitud tarne'} on võimalik, ja kontrollime teie esitatud tarneaadressi. Kuni kinnitamiseni ei ole kaup broneeritud.\n\nLugupidamisega\nMüügimeeskond`;
+  return `Hello${senderName?` ${senderName}`:''},\n\nThank you for your inquiry. We are currently checking the following:\n\n${details}\n\nOur consolidated quotation will include pricing, confirm whether ${requestedDate||'the requested delivery'} is feasible, and check the delivery address you provided. No stock is reserved until we confirm it.\n\nBest regards,\nSales team`;
 }
 
 const templateReplyDrafter:InquiryReplyDrafter=async inquiry=>({
-  draft:draftInquiryReply(inquiry.senderName,inquiry.lines,inquiry.replyLanguage,inquiry.requestedDate,inquiry.deliveryAddress),language:inquiry.replyLanguage
+  draft:draftInquiryReply(inquiry.senderName,inquiry.lines,inquiry.replyLanguage,inquiry.requestedDate),language:inquiry.replyLanguage
 });
 
 export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor, draftReply:InquiryReplyDrafter=templateReplyDrafter) {
@@ -142,14 +142,14 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const senderName=s.extracted.facts.sender[0]?.value??'';
       const customers=await erp.findCustomers(customerText);
       const customerMatches=customers.filter(c=>[c.name,c.customer_name].some(v=>normalize(v)===normalize(customerText)));
-      const needs:string[]=(s.extracted.warnings??[]).map(w=>`${w.field} 的模型证据不可靠，请对照原邮件确认`);
-      if(customerMatches.length!==1) needs.push('确认客户身份或选择 ERP 客户；这不妨碍先回复一般询价');
+      const needs:string[]=(s.extracted.warnings??[]).map(w=>`${w.field}: the model evidence is unreliable, so confirm it against the original email`);
+      if(customerMatches.length!==1) needs.push('Confirm the customer identity or pick an ERP customer; this does not block replying to a general inquiry');
       const lines=s.availability;
-      if(lines.some(line=>line.status==='unresolved')) needs.push('确认未能唯一匹配的准确商品编码');
-      if(lines.some(line=>line.status==='catalog-miss')) needs.push('ERP 目录没有候选商品，由人工确认是否供应；不要要求客户解决内部目录问题');
-      if(lines.some(line=>line.status==='untracked')) needs.push('库存数量未跟踪，需要人工确认');
-      if(lines.some(line=>line.status==='lookup-failed')) needs.push('库存查询失败，需要人工确认');
-      needs.push('确认适用价格','确认客户要求的交期能否满足');
+      if(lines.some(line=>line.status==='unresolved')) needs.push('Confirm the exact item code for anything that could not be matched uniquely');
+      if(lines.some(line=>line.status==='catalog-miss')) needs.push('The ERP catalog holds no candidate item, so a human must confirm whether it can be supplied; do not ask the customer to solve an internal catalog problem');
+      if(lines.some(line=>line.status==='untracked')) needs.push('The stock quantity is untracked and needs manual confirmation');
+      if(lines.some(line=>line.status==='lookup-failed')) needs.push('The inventory lookup failed and needs manual confirmation');
+      needs.push('Confirm the applicable price','Confirm whether the requested lead time can be met');
       const condition=s.extracted.intent?.evidence.value??'';
       const kind=s.extracted.intent?.kind;
       const intent:InquiryCase['intent']=kind==='inquiry'||kind==='conditional'||kind==='unclear'?kind:'unclear';

@@ -1,60 +1,62 @@
-# 从一条订单认识三个组件
+# Three components, seen through one order
 
-## 自然语言邮件（当前入口）
+## Natural-language email (the current entry point)
 
-收件箱默认 Gemini 2.5 Flash-Lite 模式，通过共享 `src/model.ts` 入口读取 `.env` 中的 `GOOGLE_API_KEY`。点击“填入自然语言询问”或自行写虚构邮件，再发送。模板模式仍可选且不调用模型。`ORDER_TRACE=true` 且配置 LangSmith 密钥时，LangGraph 根 trace 会包含抽取、只读库存 Tool、回复生成和人工 interrupt；批准回复后，人工决定还会作为 feedback 关联到原根 run。
+The inbox defaults to Gemini 2.5 Flash-Lite, reading `GOOGLE_API_KEY` from `.env` through the shared entry point in `src/model.ts`. Click "Fill in a natural-language inquiry" or write your own fictional email, then send it. Template mode is still available and makes no model calls. With `ORDER_TRACE=true` and a LangSmith key configured, the LangGraph root trace covers extraction, the read-only inventory tool, reply generation, and the human interrupt; after a reply is approved, the human decision is attached as feedback to that same root run.
 
-模型提出 purchase / inquiry / conditional / unclear 意图及原文证据。非明确购买必须由人工获得客户确认、勾选确认并填写依据，才能继续批准；不满足条件会再次 interrupt。未知商品、缺少 PO/单位/地址、中文数量或相对日期由人工核对，不能伪造原文值。引用不唯一或 API 错误会停止，不自动降级或重试。
+The model proposes one of `purchase` / `inquiry` / `conditional` / `unclear`, together with evidence quoted from the source. Anything that is not an explicit purchase needs a human to obtain customer confirmation, tick the confirmation, and record the basis before approval can proceed; if those conditions are not met, the graph interrupts again. Unknown items, a missing PO/unit/address, Chinese numerals, and relative dates all require human checking — source values must never be invented. An ambiguous quote or an API error stops the run; there is no automatic downgrade or retry.
 
-自然语言理解会把客户公司 `customer`、人类联系人 `sender`、公司或发件人所在地 `location` 与明确的送货地址 `address` 分开保存，并在页面显示各自的原文证据。联系人姓名可用于可编辑回复草稿；只有公司字段参与 ERP 客户匹配，只有明确送货地址才可进入订单。将来接入真实邮箱时，发件邮箱应从 MIME `From` header 确定性读取，而不是让模型从正文猜测。
+Natural-language understanding keeps the customer company (`customer`), the human contact (`sender`), the company or sender location (`location`), and an explicit delivery address (`address`) as separate fields, and the page shows the source evidence for each one. The contact name can be used in the editable reply draft; only the company field takes part in ERP customer matching, and only an explicit delivery address can reach the order. When a real mailbox is connected later, the sending address should be read deterministically from the MIME `From` header rather than guessed by the model from the body.
 
-“interested in placing an order / considering / 想了解 / 考虑购买”等软性购买语言会被确定性保护规则降级为 `conditional`，即使模型误报 `purchase` 也不会直接进入订单严格校验。商品描述含 `A10` 这类型号片段时，只在 ERP 目录恰好唯一匹配时补成商品编码；泛称 `Filter` 仍保持未解决。
+Reply language is inferred from the prose the sender actually wrote, never from the company name, address or country — a German company writing in English gets an English reply, which is the intended behaviour. That inference is not fully reliable. A measurement over the labelled evaluation set plus the fixture emails found that the deterministic marker rule commits on roughly a third of the corpus and defers to the model's own language tag on the rest, that no case ever landed in an "undetermined" state, and that the top-two candidate scores from a trigram detector were too close together to serve as an uncertainty signal on business-length mail. Short emails, mixed-language emails and heavily quoted threads remain the risky cases. The UI therefore asks the reviewer to confirm the reply language before approving. Treat this as a known limit, not a solved problem: it has not yet been exercised on real mailbox traffic.
 
-最终产出是人工批准后的 Mock Sales Order 草稿与审核记录。没有发信、报价、付款链接、收款或自动 AI 客服；询问由本地审核人员处理。正式 ERP 路径也仅创建 docstatus=0 草稿。下面较早的“仅模板”说明属于先前阶段。
+Soft purchase language — "interested in placing an order", "considering", 想了解, 考虑购买 — is downgraded to `conditional` by a deterministic guard, so even a mistaken `purchase` label from the model never goes straight into strict order validation. When an item description contains a model-like fragment such as `A10`, it is filled in as an item code only if the ERP catalog matches exactly one entry; a generic `Filter` stays unresolved.
 
-### 两条子流程
+The final output is a human-approved Mock Sales Order draft plus the review record. There is no mail sending, quoting, payment link, payment collection, or automatic AI support agent; inquiries are handled by a local reviewer. The real ERP path likewise only creates a docstatus=0 draft. The earlier "template only" notes below belong to a previous stage.
 
-- 所有含商品行的邮件先进入共享 `resolveInventory` 节点：确定性匹配 ERP 商品，并仅对唯一匹配项调用只读库存工具；无法唯一匹配时保留 `unresolved`，不猜编码。库存只是审核快照，不自动拒单、预留库存或承诺交期。
-- `purchase`：复用上述商品与库存结果，再匹配客户和地址、执行订单必填校验，人工 interrupt 审核后才可创建 Mock ERP Sales Order 草稿。
-- `inquiry / conditional / unclear`：复用上述只读库存结果，不运行 PO、地址、日期和单位的订单必填校验；整理价格、交期、客户身份等待办，并生成可编辑回复草稿。人工可批准回复草稿、要求补充或关闭工单。批准只记录决定，当前不会发信。
+### The two branches
 
-模板练习使用确定性短模板，不调用模型。Gemini 自然语言模式则在只读 ERP 查询完成后进入独立 `draftInquiryReply` 节点，把结构化商品状态、请求数量、原文交付日期和待人工确认项交给同一个固定模型。它仍只生成可编辑草稿，不自动发信。
+- Every email that contains item lines first enters the shared `resolveInventory` node: it matches ERP items deterministically and calls the read-only inventory tool only for unique matches; anything that cannot be matched uniquely stays `unresolved` and no code is guessed. Inventory is a review snapshot only — it never rejects an order automatically, reserves stock, or promises a lead time.
+- `purchase`: reuses those item and inventory results, then matches the customer and address and runs the required-field validation for orders. Only after a human interrupt is approved can a Mock ERP Sales Order draft be created.
+- `inquiry / conditional / unclear`: reuses the read-only inventory results without running the PO, address, date, or unit validation. It collects the outstanding items — price, lead time, customer identity — and produces an editable reply draft. A human can approve the draft, request more information, or close the ticket. Approval only records the decision; nothing is sent today.
 
-Gemini 自然语言模式使用两次串行请求：第一次抽取并标记邮件主要语言；代码随后执行目录匹配和只读库存查询；第二次仅根据结构化结果生成该语言的回复。草稿必须逐项保留商品描述、请求数量和已知商品编码；库存数字只能表述为 ERP 快照，不得承诺分配或交付，也不得虚构价格、日期、订单、付款或链接。两次调用都进入本地 ledger；启用追踪时各自进入 LangSmith。任一 API 错误都会停止且不自动重试。回复节点失败时 checkpoint 保留已完成的库存结果，页面显示 `reply-error`，不会进入人工批准或 ERP 写入。
+Template practice uses deterministic short templates and makes no model calls. Gemini natural-language mode, once the read-only ERP lookups are done, enters a separate `draftInquiryReply` node that hands the structured item statuses, requested quantities, source delivery date, and outstanding human checks to the same fixed model. It still only produces an editable draft and never sends mail automatically.
 
-Mock ERP 从 `fixtures/erp-spareparts-demo` 加载 30 个商品、12 个客户、客户地址、分仓库存和历史销售订单。FILTER-A10 合计 12 件，FILTER-A20 为 0，NON-STOCK-01 返回库存未跟踪；历史 ACME Customer PO 参与重复检查。价格与交期工具尚未实现，因此仍标为人工待办。这一分流只证明流程机制可运行，不证明模型在真实 300 封邮件上的分类准确率或节省时间；需要由用户提供独立留出样本，记录人工基线后评估。
+Gemini natural-language mode makes two serial requests: the first extracts the facts and marks the email's main language; the code then runs catalog matching and read-only inventory lookups; the second generates a reply in that language from the structured results alone. The draft must carry over each item description, requested quantity, and known item code; stock numbers may only be described as an ERP snapshot, never as an allocation or a delivery promise, and price, dates, orders, payment, or links must not be invented. Both calls go into the local ledger, and into LangSmith when tracing is on. Any API error stops the run with no automatic retry. If the reply node fails, the checkpoint keeps the completed inventory results, the page shows `reply-error`, and nothing reaches human approval or an ERP write.
 
-## 模拟收件箱（2026-09-22）
+The Mock ERP loads 30 items, 12 customers, customer addresses, per-warehouse stock, and historical sales orders from `fixtures/erp-spareparts-demo`. FILTER-A10 totals 12, FILTER-A20 is 0, and NON-STOCK-01 reports untracked stock; the historical ACME Customer PO participates in duplicate checks. Price and lead-time tools are not implemented yet, so they stay on the human to-do list. This routing only shows that the mechanism runs — it does not prove classification accuracy or time saved on a real 300-email inbox. That needs an independent held-out sample supplied by the user, with a recorded human baseline.
 
-运行 `npm run learn`，打开 http://127.0.0.1:3210 。选择样例并点击“填入样例”，可编辑邮件正文与模拟 PDF 提取文本，再点击“发送到模拟收件箱”。从收件箱打开邮件，用商品下拉框及数量表单审核，填写理由后批准、要求补充或拒绝。JSON 收在高级选项中。
+## The mock inbox (2026-09-22)
 
-发送新邮件保留已有邮件和 Mock 订单，可重复发送同 PO 观察防重。刷新收件箱可重新打开已有会话并查看累计节点日志；“清空收件箱与模拟订单”或服务重启才清空本轮数据。新收件箱采用模板提取、真实 LangGraph、Mock ERP，不调用 Gemini 或上传 LangSmith；附件栏是模拟提取文本，不是实际 PDF 上传。旧 `/api/start` 仍保留清空上一轮的兼容行为，页面不再使用它。
+Run `npm run learn` and open http://127.0.0.1:3210. Pick a sample and click "Load sample", edit the email body and the simulated PDF text, then click "Send to mock inbox". Open a message from the inbox, review it with the item dropdowns and the quantity fields, fill in a reason, and then approve, request info, or reject. The raw JSON is kept under the advanced section.
 
-以下旧卡片说明供理解底层组件，日常操作以模拟收件箱为准。
+Sending a new email keeps existing messages and Mock orders, so you can send the same PO again to watch duplicate handling. Refreshing the inbox reopens an existing session and shows the accumulated node log; only "Clear inbox and mock orders" or a server restart clears the current round of data. The inbox also watches the local Mailpit mailbox: any mail sent there is ingested within a few seconds and appears here on its own, and "Check mailbox (Mailpit)" pulls it immediately. See [infra/README.md](../infra/README.md) for the local mailbox setup. The new inbox uses template extraction, real LangGraph, and the Mock ERP — it does not call Gemini or upload to LangSmith, and the attachment box is simulated extracted text, not a real PDF upload. The old `/api/start` endpoint keeps its previous clear-then-start behaviour for compatibility, but the page no longer uses it.
 
-## 可操作学习台（推荐先用）
+The older notes below explain the underlying components; for day-to-day use, the mock inbox is the reference.
 
-运行 `npm run learn`，打开 http://127.0.0.1:3210 。只绑定本机，使用模拟 ERP、真实 LangChain Tool 与现有 LangGraph，绝不调用模型或上传 trace。无需 .env。每次点击“新建练习”都会清空上一轮 mock ERP 订单；也可点“重置练习数据”。浏览器刷新不会清空服务端状态。SQLite 检查点位于内存，服务重启会清空整个练习会话。正式 CLI 的磁盘持久化不受影响。
+## The operable practice bench (start here)
 
-1. 工具卡：先查 FILTER-A10，再把 itemCode 改成数字，观察 schema 拒绝；改为 UNKNOWN，观察业务函数报错。
-2. 正常订单：新建练习，观察 review 暂停、mockWrites=0；填写理由并批准，观察 write 更新与 END。
-3. 冲突订单：比较邮件 5 / PDF 8；空理由批准应继续暂停；明确核对依据后批准。重读 checkpoint 检查 audit。
-4. 型号不明：`DEMO-002` 是存在的 PO 编号；问题是原文商品只写 `Filter`，无法在 `FILTER-A10` 与 `FILTER-A20` 中唯一匹配。没有客户补充证据时选择“要求补充”；得到确认后才修改 `lines[0].item`。这里只是开发练习，不是提取准确率评估。
+Run `npm run learn` and open http://127.0.0.1:3210. It binds to localhost only, uses the Mock ERP, a real LangChain tool, and the existing LangGraph, and never calls a model or uploads a trace. No `.env` is needed. Each new practice run clears the previous round's Mock ERP orders, and "Clear inbox and mock orders" does the same. Refreshing the browser does not clear server-side state. The SQLite checkpoints live in memory, so a server restart clears the whole practice session; disk persistence in the formal CLI is unaffected.
 
-学习台本地事件来自 graph.stream，不是 LangSmith trace。页面没有真实模型或 ERP 写入入口。代码入口：scripts/learn.ts、src/learn.html；业务图仍为 src/workflow.ts。
+1. Tool card: look up FILTER-A10 first, then change itemCode to a number and watch the schema reject it; change it to UNKNOWN and watch the executor function throw.
+2. Clean order: start a new run, watch it pause at review with mockWrites=0; fill in a reason and approve, and watch write update and the flow reach END.
+3. Quantity conflict: compare email 5 against PDF 8; approving with an empty reason should keep pausing; approve once you have an explicit reconciliation basis. Re-read the checkpoint to inspect the audit.
+4. Ambiguous item: `DEMO-002` is a PO number that exists; the problem is that the source item says only `Filter`, which cannot be matched uniquely between `FILTER-A10` and `FILTER-A20`. Without added evidence from the customer, choose "Request info"; only edit `lines[0].item` once it is confirmed. This is a development exercise, not an extraction-accuracy evaluation.
 
-先跑 `npm run demo`。它使用虚构文件、HTTP mock ERP 和模板解析器，不调用模型。输出会给出 thread id、模拟订单号及 data 下的结果路径。脚本自动批准只用于这个 mock 演示，正式 CLI 仍需人工决定。
+The practice bench's local events come from `graph.stream`, not from a LangSmith trace. The page has no real model or ERP write entry point. Code entry points: `scripts/learn.ts` and `src/learn.html`; the business graph is still `src/workflow.ts`.
 
-| 组件 | 本项目中的位置 | 上手时观察什么 |
+Start with `npm run demo`. It uses fictional files, the HTTP mock ERP, and the template parser, and calls no model. The output gives the thread id, the mock order name, and the result paths under `data/`. The scripted auto-approval applies only to this mock demo; the formal CLI still requires a human decision.
+
+| Component | Where it lives in this project | What to watch first |
 | --- | --- | --- |
-| LangGraph | src/workflow.ts | extract → match → review；interrupt 暂停，SQLite checkpoint 保存状态；批准后进入 write，校验失败回审核 |
-| LangChain | src/model.ts 的 inventoryTool | 模型返回 get_inventory 参数；Zod 校验；工具调用 ERP 只读接口；未跟踪库存返回 null |
-| LangSmith | `scripts/learn.ts` 的图追踪及 `src/model.ts` 的子 run / feedback | 查看一条根 trace 中的图节点、LLM、只读 Tool 和 interrupt；人工决定关联为 feedback |
+| LangGraph | src/workflow.ts | extract → match → review; an interrupt pauses the run and the SQLite checkpoint stores state; approval moves to write, and a failed validation returns to review |
+| LangChain | `inventoryTool` in src/model.ts | the model returns `get_inventory` arguments; Zod validates them; the tool calls a read-only ERP endpoint; untracked stock returns null |
+| LangSmith | graph tracing in `scripts/learn.ts`, plus child runs and feedback in `src/model.ts` | inspect the graph nodes, the LLM, read-only tools, and the interrupt within one root trace; human decisions attach as feedback |
 
-第二步在真实 ERP 下用 README 的 import/show/review 命令观察 pendingReview、issues、revision。先查看暂停状态，再手工处理冲突；decide approve 会写真实 ERP Draft。中断与跨进程恢复不需要先调用模型。
+Step two uses the README's import/show/review commands against the real ERP to observe pendingReview, issues, and revision. Look at the paused state first, then handle the conflict by hand; a decide approve writes a real ERP Draft. Interrupts and cross-process recovery do not need a model call first.
 
-第三步验证 Gemini 2.5 Flash-Lite 的真实调用和 LangSmith trace。用户已撤销两次 / $0.05 本地上限；历史失败记录保留。询价流程使用一次抽取请求和一次回复请求，库存 Tool 本身不调用模型。遇到额度、限流或其他 API 错误停止，不自动重试或切换。免费额度由 Google 项目控制，账本不保证免费。成功的完整图与 Tool 轨迹已验证；模型准确率仍需人类提供的留出数据集评测。
+Step three verifies the real Gemini 2.5 Flash-Lite calls and the LangSmith traces. The owner revoked the two-request / $0.05 local cap; the record of past failures is kept. The inquiry flow uses one extraction request and one reply request, and the inventory tool itself makes no model calls. Quota, rate-limit, or other API errors stop the run — no automatic retry or switching. Free-tier availability is controlled by the Google project, and the ledger does not guarantee it. A successful complete graph and tool trace has been verified; model accuracy still needs evaluation on a human-supplied held-out dataset.
 
-当前已实现上述本地练习 UI，复用现有图和人工审核校验；仅连接模拟 ERP。后续可在真实工具轨迹验证后展示对应 trace 链接，真实 ERP 审核仍使用正式 CLI。
+The local practice UI described above is implemented, reusing the existing graph and the human-review validation, and connecting only to the mock ERP. Once real tool traces are verified, the corresponding trace links can be shown; real ERP review still uses the formal CLI.
 
-Skills 按当前任务读取，不一次加载整个库。Miko 的监督范围由 miko.json 明确声明。superpowers 后续接入时再核对安装方式、许可及与 Ponytail/Miko 的边界。
+Skills are read per task rather than loading the whole library at once. Miko's supervision scope is declared explicitly in `miko.json`. The superpowers integration will be checked later for install method, license, and its boundary with Ponytail/Miko.

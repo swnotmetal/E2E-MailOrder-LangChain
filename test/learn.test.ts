@@ -11,10 +11,10 @@ test('learning UI API validates tools, pauses graph, resumes human review and bl
   };
   try {
     const html=await (await fetch(lab.url)).text();
-    assert.match(html,/LangChain/);assert.match(html,/scenario'\)\.onchange/);assert.match(html,/请选择样例或发送自然语言邮件/);
-    assert.match(html,/understanding-error/);assert.match(html,/reply-error/);assert.match(html,/回复生成失败/);
-    assert.match(html,/LangSmith feedback 已记录/);
-    assert.match(html,/目录与库存查询没有运行/);assert.match(html,/id="inquiryLines"/);assert.match(html,/id="orderInventory"/);
+    assert.match(html,/LangChain/);assert.match(html,/scenario'\)\.onchange/);assert.match(html,/Pick a sample or send a natural-language email/);
+    assert.match(html,/understanding-error/);assert.match(html,/reply-error/);assert.match(html,/Reply generation failed/);
+    assert.match(html,/LangSmith feedback recorded/);
+    assert.match(html,/the catalog and inventory lookups did not run/);assert.match(html,/id="inquiryLines"/);assert.match(html,/id="orderInventory"/);
     assert.equal((await post('tool',{itemCode:42})).status,400);
     const tool=await post('tool',{itemCode:'FILTER-A10'});
     assert.equal(tool.data.output.totalActualQty,12);

@@ -1,5 +1,11 @@
 # B2B Email Order Review Lab
 
+**What it solves.** A fictional B2B inbox-to-ERP problem: turning customer emails and text PDFs into reviewed order drafts, with ERP reads kept read-only and every ERP write behind human approval.
+
+**What it demonstrates.** Bounded autonomy — deterministic validation before any write, human review interrupts, persisted checkpoints with replay recovery, and evidence traceable back to source text.
+
+**Why it matters.** A concrete, honestly scoped pattern for bringing AI into enterprise workflows where audit, control, and reversibility matter more than raw automation.
+
 An open-source, consulting-oriented IT engineering portfolio: a bounded B2B email-to-ERP workflow that demonstrates how business requirements become traceable, human-controlled software using TypeScript, LangChain, LangGraph, LangSmith, SQLite, and ERPNext-compatible APIs.
 
 All examples and fixture records are fictional. The project deliberately has no vector database or multi-agent workflow. Every live model path uses only `gemini-2.5-flash-lite` through the shared entry point in `src/model.ts`; deterministic tests make no model calls.
@@ -50,29 +56,6 @@ This project intentionally does not claim:
 
 The workflow validates extracted evidence and order constraints, then requires human review before an ERP Draft write. It does not claim to classify spam or provide inbox security; suspicious or irrelevant mail handling is outside the current implementation.
 
-## Fast start
-
-```powershell
-npm ci
-npm run check
-npm test
-npm run learn
-```
-
-Then open http://127.0.0.1:3210 for the local learning UI. See [docs/learning-guide.md](docs/learning-guide.md) for the Chinese-first walkthrough.
-
-## Evidence and benchmarks
-
-Current evidence is explicitly bounded and fictional:
-
-- local ERPNext-compatible mock runs for human-approved Draft creation and duplicate checks;
-- a LangSmith trace exists for one fictional inquiry flow with extraction, read-only inventory tools, grounded drafting, and interrupt-based review;
-- deterministic benchmarks and gold fixtures are kept separate from live model output;
-- all unverified claims remain labeled as such in the docs and verification notes.
-
-See [docs/verification.md](docs/verification.md), [docs/evaluation.md](docs/evaluation.md), and [docs/model.md](docs/model.md) for the precise boundaries.
-The isolated Finnish KEV experiment was paused without runtime integration; its measured scope and limitations are recorded in [one short experiment note](experiments/kev-finnish-poc/README.md).
-
 ## Quick start
 
 Requirements: Node.js 22.18 or newer.
@@ -84,7 +67,7 @@ npm test
 npm run learn
 ```
 
-Open <http://127.0.0.1:3210>. The local learning UI is currently Chinese-first and uses fictional data. It lets you submit realistic email prose, inspect routing and tool activity, edit a pending draft, and resume a human-review interrupt. See the [Chinese learning guide](docs/learning-guide.md).
+Open <http://127.0.0.1:3210> for the local learning UI. It uses fictional data throughout: submit realistic email prose, inspect routing and tool activity, edit a pending draft, and resume a human-review interrupt. See the [learning guide](docs/learning-guide.md).
 
 To make the ERP boundary visible as a separate process, start the fixture-backed local HTTP service in one terminal:
 
@@ -100,6 +83,21 @@ npm run learn
 ```
 
 Both processes use fictional fixture data. Stopping the mock ERP lets you observe a network failure without granting the model any write access.
+
+## Evidence and benchmarks
+
+Current evidence is explicitly bounded and fictional:
+
+- local ERPNext-compatible mock runs for human-approved Draft creation and duplicate checks;
+- a LangSmith trace exists for one fictional inquiry flow with extraction, read-only inventory tools, grounded drafting, and interrupt-based review;
+- deterministic benchmarks and gold fixtures are kept separate from live model output;
+- all unverified claims remain labeled as such in the docs and verification notes.
+
+See [docs/verification.md](docs/verification.md), [docs/evaluation.md](docs/evaluation.md), and [docs/model.md](docs/model.md) for the precise boundaries.
+
+## Negative results
+
+Not every experiment worked, and the failures are published rather than hidden. A bounded test of whether a local 0.8B decision model (**KEV**) could take over intent classification from the hosted model came back negative: purchase-intent recall was 1/6 on 24 human-reviewed fictional Finnish emails, and Finnish sentiment accuracy was 0.5867 on a 300-row sample. The experiment was paused, its generated artifacts were removed, and **no second model was added to the application** — the single-model policy in `AGENTS.md` still holds. See the [KEV Finnish experiment note](experiments/kev-finnish-poc/README.md) for the measured scope and limits.
 
 ## Other runnable paths
 

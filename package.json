@@ -9,6 +9,8 @@
   "scripts": {
     "learn": "tsx scripts/learn.ts",
     "mock:erp": "tsx scripts/mock-erp-server.ts",
+    "mail:send": "tsx scripts/send-mail.ts",
+    "mail:ingest": "tsx scripts/mail-ingest.ts",
     "check": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
     "cli": "tsx src/cli.ts",
@@ -24,12 +26,16 @@
     "@langchain/langgraph": "^1.4.16",
     "@langchain/langgraph-checkpoint-sqlite": "^1.0.4",
     "langsmith": "^0.10.4",
+    "mailparser": "^3.9.38",
     "pdfjs-dist": "^6.3.289",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.9.0",
     "@types/node": "^26.6.2",
+    "@types/nodemailer": "^8.0.2",
     "koma-miko": "^0.1.0-alpha.12",
+    "nodemailer": "^10.1.0",
     "pdf-lib": "^1.17.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

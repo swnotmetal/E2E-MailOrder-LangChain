@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { Command } from '@langchain/langgraph';
-import { readSources, templateExtractor, verifyEvidence } from '../src/input.js';
+import { joinPdfItems, readSources, templateExtractor, verifyEvidence } from '../src/input.js';
 import { workflow } from '../src/workflow.js';
 import { FrappeERP } from '../src/erp.js';
 import { validate, type Decision, type InquiryDecision } from '../src/domain.js';
@@ -25,6 +25,12 @@ test('PDF extraction preserves exact source offsets; forged evidence rejected',a
   const input=await sources(),e=await templateExtractor(input);
   assert.equal(e.facts.po.length,2);assert.equal(e.lines.length,2);verifyEvidence(e,input);
   e.facts.po[0].evidence.quote='forged';assert.throws(()=>verifyEvidence(e,input),/INVALID_EVIDENCE/);
+});
+test('PDF text joining keeps CJK runs intact without dropping Latin separators',()=>{
+  assert.equal(joinPdfItems([{str:'如果这批货物能在'},{str:'下周五之前'},{str:'送达我司。'}]),'如果这批货物能在下周五之前送达我司。');
+  assert.equal(joinPdfItems([{str:'Reference:'},{str:'FILTER-B50'},{str:'5'}]),'Reference: FILTER-B50 5');
+  assert.equal(joinPdfItems([{str:'型号'},{str:'FILTER-B50'},{str:'数量'},{str:'5'}]),'型号FILTER-B50数量5');
+  assert.equal(joinPdfItems([{str:'PO: ABC-1',hasEOL:true},{str:'Item: FILTER-A10'}]),'PO: ABC-1\nItem: FILTER-A10');
 });
 test('clean order interrupts before HTTP write then creates a draft',async()=>{
   const x=await setup();try {
@@ -181,6 +187,24 @@ test('fuzzy catalog candidates are ranked for review but never auto-selected',as
     ]);
     assert.equal(state.values.draft.lines[0].item,'');
     assert.equal(state.values.availability[0].status,'unresolved');
+    assert.equal(x.mock.posts,0);
+  }finally{await x.close();}
+});
+test('reply language follows the prose, not the company country, address or foreign sign-off',async()=>{
+  const x=await setup();try{
+    const text=`Müller Auto Service Garage\nSchumannstraße 45, 10117 Berlin, Germany\nLucas Weber, Einkauf\n\nHello,\nWe are looking to finalize this purchase provided that delivery can be guaranteed by next Friday. Please confirm availability of 5x Filter X200.\n\nMit freundlichen Grüßen\nLucas Weber`;
+    const fact=(quote:string,value=quote)=>{const start=text.indexOf(quote);const within=quote.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start:start+within,end:start+within+value.length,quote:value}};};
+    const empty={value:'',evidence:{source:'email' as const,page:0,start:0,end:0,quote:''}};
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[fact('Müller Auto Service Garage')],sender:[fact('Lucas Weber')],location:[],po:[],date:[fact('next Friday')],address:[fact('Schumannstraße 45, 10117 Berlin, Germany')]},
+      intent:{kind:'conditional' as const,evidence:fact('provided that delivery can be guaranteed')},reply:{language:'de'},
+      lines:[{description:fact('Filter X200'),quantity:fact('5x','5'),unit:empty}]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('locale-mismatch'));
+    const inquiry=(await graph.getState(config('locale-mismatch'))).values.inquiry;
+    assert.equal(inquiry.replyLanguage,'en');
+    assert.match(inquiry.responseDraft,/Hello Lucas Weber/);
+    assert.match(inquiry.responseDraft,/next Friday is feasible/);
+    assert.match(inquiry.responseDraft,/Filter X200: our team is checking whether this product can be supplied/);
+    assert.doesNotMatch(inquiry.responseDraft,/Schumannstraße/);
     assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });

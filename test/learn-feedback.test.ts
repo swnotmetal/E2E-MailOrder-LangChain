@@ -14,14 +14,14 @@ test('learning feedback distinguishes edited, blocked and successfully approved 
     render(base);
     $('draft').value=JSON.stringify({lines:[{item:'FILTER-A10'}]});edited();
   `,context);
-  assert.match(get('editFeedback').textContent,/已识别.*FILTER-A10/);
-  assert.match(get('editFeedback').textContent,/尚未提交/);
+  assert.match(get('editFeedback').textContent,/Recognized the item you entered:.*FILTER-A10/);
+  assert.match(get('editFeedback').textContent,/Not submitted/);
   assert.match(get('blocker').className,/notice/);
   runInNewContext(`render({...base,pending:[{feedback:'RESOLUTION_REASON_REQUIRED'}]},$('draft').value);`,context);
-  assert.match(get('editFeedback').textContent,/缺少审核理由/);
+  assert.match(get('editFeedback').textContent,/review reason is missing/);
   assert.match(get('draft').value,/FILTER-A10/);
   runInNewContext(`render({...base,next:[],pending:[],values:{...base.values,status:'created',order:'MOCK-SO-1',issues:[]}});`,context);
-  assert.match(get('lesson').textContent,/批准成功.*MOCK-SO-1/);
+  assert.match(get('lesson').textContent,/Approved: mock order created.*MOCK-SO-1/);
   assert.match(get('lesson').className,/ok/);
   assert.equal(get('blocker').hidden,true);
 });
