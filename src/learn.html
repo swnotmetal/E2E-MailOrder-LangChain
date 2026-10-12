@@ -110,7 +110,7 @@ function render(s,preservedDraft){
   }
   $('events').textContent=pretty(s.events);$('state').textContent=pretty(s);
   $('reload').disabled=false;outcome();renderForm();
-  $('progress').textContent=s.error?(s.values.status==='inquiry-prepared'?'Inquiry: ✓ understand → ✓ inventory lookup → ✗ reply generation: ':'Flow error: ')+s.error:s.values.status==='created'?'Order: ✓ understand → ✓ validate → ✓ human approval → ✓ Mock ERP draft '+s.values.order:s.values.status==='response-approved'?'Inquiry: ✓ understand → ✓ inventory lookup → ✓ human-approved reply draft':s.values.inquiry?'Inquiry: ✓ understand → ✓ inventory lookup → ✓ reply generated → ⏸ reply review':'Order: ✓ understand → ✓ match → ⏸ order review';
+  $('progress').textContent=s.error?(s.values.status==='inquiry-prepared'?'Inquiry: ✓ understand → ✓ inventory lookup → ✗ reply generation: ':'Flow error: ')+s.error:s.values.status==='created'?'Order: ✓ understand → ✓ validate → ✓ ERP draft '+s.values.order:s.values.status==='response-approved'?'Inquiry: ✓ understand → ✓ inventory lookup → ✓ human-approved reply draft':s.values.inquiry?'Inquiry: ✓ understand → ✓ inventory lookup → ✓ reply generated → ⏸ reply review':'Order: ✓ understand → ✓ match → ⏸ order review';
 }
 async function run(fn){
   $('status').textContent='Working…';document.querySelectorAll('button').forEach(b=>b.disabled=true);

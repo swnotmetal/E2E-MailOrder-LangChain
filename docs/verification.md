@@ -59,7 +59,7 @@
 
 真实 ERP 验收：**未完成**。重启后固件虚拟化和 WSL2 均可用，但 Docker Desktop 4.36.0 启动时报 OTel manager 残留 socket 不可访问，然后退出。未重置 Docker 数据，也未创建真实 ERP 订单。infra/start.ps1、权限、初始化、ERP唯一索引和 API 行为必须在可运行的本地实例再验收。
 
-输入限制：UTF-8 纯文本邮件 + 可提取文字 PDF；默认固定英文标签解析器；可选模型适配器尚未经付费 API 验证；无 OCR 或复杂 MIME。审核为 CLI/JSON，尚无网页。ERP 目录读取上限 1000，超过时明确失败。价格由 ERP EUR price list 计算；stock_uom 整数数量。开发数据预期仍需用户人工确认。
+输入限制：UTF-8 纯文本邮件或真实 MIME（mailparser 解码 base64 / quoted-printable 与 PDF 附件）+ 可提取文字 PDF；无 OCR。默认固定英文标签解析器；可选 Gemini 2.5 Flash-Lite 抽取器，已有真实调用与 ledger 记录。审核入口为 CLI 与本地学习台网页。ERP 目录读取上限 1000，超过时明确失败。价格由 ERP EUR price list 计算；stock_uom 整数数量。开发数据预期仍需用户人工确认。
 
 测试是开发回归，mock 实现可以与适配器共享错误假设，因此不用于宣称真实 ERP 集成完成。下一步首先解除 ERP 运行阻碍并完成真实写入验收，再接自由文本模型和独立盲测。
 

@@ -32,6 +32,43 @@ test('PDF text joining keeps CJK runs intact without dropping Latin separators',
   assert.equal(joinPdfItems([{str:'型号'},{str:'FILTER-B50'},{str:'数量'},{str:'5'}]),'型号FILTER-B50数量5');
   assert.equal(joinPdfItems([{str:'PO: ABC-1',hasEOL:true},{str:'Item: FILTER-A10'}]),'PO: ABC-1\nItem: FILTER-A10');
 });
+// The template adapter never asserts an intent, so only an extractor that actually understood
+// the mail can reach the automatic proposal path. These two stubs pin both sides of the gate.
+const cleanOrderText='Customer: Acme Workshop\nPO: DEMO-777\nDelivery: 2027-03-01\nAddress: 10 Test Road, Helsinki, 00100, Finland\nItem: FILTER-A10 | 5 | Nos';
+function orderExtractor(text:string,address:string) {
+  const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+  return async()=>({facts:{customer:[fact('Acme Workshop')],sender:[],location:[],po:[fact('DEMO-777')],date:[fact('2027-03-01')],address:[fact(address)]},
+    intent:{kind:'purchase' as const,evidence:fact('Item:')},
+    lines:[{description:fact('FILTER-A10'),quantity:fact('5'),unit:fact('Nos')}]});
+}
+test('a conforming purchase is proposed to the ERP without a human interrupt',async()=>{
+  const x=await setup();try{
+    const graph=workflow(x.erp,x.saver,orderExtractor(cleanOrderText,'10 Test Road, Helsinki, 00100, Finland'));
+    await graph.invoke({sources:[{source:'email',page:0,text:cleanOrderText}]},config('auto-propose'));
+    const s=await graph.getState(config('auto-propose'));
+    assert.equal(s.values.conformance,'');
+    assert.equal(s.values.status,'created');
+    assert.equal(s.tasks.length,0);
+    assert.equal(x.mock.posts,1);
+    assert.equal(s.values.audit.length,1);
+    assert.equal(s.values.audit[0].action,'auto-propose');
+    assert.equal(s.values.audit[0].actor,'assistant');
+  }finally{await x.close();}
+});
+test('a purchase with any unresolved issue still stops behind the human interrupt',async()=>{
+  const x=await setup();try{
+    const text=cleanOrderText.replace('10 Test Road, Helsinki, 00100, Finland','999 Nowhere Lane, Berlin');
+    const graph=workflow(x.erp,x.saver,orderExtractor(text,'999 Nowhere Lane, Berlin'));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('not-conforming'));
+    const s=await graph.getState(config('not-conforming'));
+    assert.match(s.values.conformance,/^deterministic validation failed: /);
+    assert.match(s.values.conformance,/ADDRESS_MISMATCH/);
+    assert.equal(s.values.status,'review');
+    assert.equal(s.tasks[0].interrupts.length,1);
+    assert.equal(x.mock.posts,0);
+    assert.equal(s.values.audit.length,0);
+  }finally{await x.close();}
+});
 test('clean order interrupts before HTTP write then creates a draft',async()=>{
   const x=await setup();try {
     await x.graph.invoke({sources:await sources()},config());

@@ -57,3 +57,20 @@ export function validate(d: Draft): Issue[] {
   });
   return issues;
 }
+
+// The assistant may materialise a proposal into ERP without waiting for a human only while
+// this returns an empty string. Every other outcome stays behind the review interrupt, which
+// is what keeps unparsed, conflicting or ambiguous mail out of the ERP.
+export function orderConformance(extracted: Extraction, issues: Issue[]): string {
+  if (extracted.intent?.kind !== 'purchase') return 'the intent is not an explicit purchase';
+  if (issues.length) return `deterministic validation failed: ${[...new Set(issues.map(i => i.code))].join(', ')}`;
+  return '';
+}
+
+export function inquiryConformance(extracted: Extraction, replyDraft: string): string {
+  const kind = extracted.intent?.kind;
+  if (kind !== 'inquiry' && kind !== 'conditional') return 'the intent is not a determinate inquiry';
+  if ((extracted.warnings ?? []).length) return `extraction warnings: ${[...new Set((extracted.warnings ?? []).map(w => w.code))].join(', ')}`;
+  if (!replyDraft.trim()) return 'the reply draft is empty';
+  return '';
+}

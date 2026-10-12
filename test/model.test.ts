@@ -156,10 +156,12 @@ test('Gemini drafts an inquiry reply from structured ERP results in the requeste
     assert.equal(input.lines[0].availability,'requested-quantity-not-currently-confirmed');assert.equal('inventory' in input.lines[0],false);assert.equal('itemCode' in input.lines[0],false);
     assert.equal(input.lines[1].availability,'not-in-our-catalog');
     const instruction=body.systemInstruction.parts[0].text;
-    assert.match(instruction,/not-in-our-catalog means our own catalogue holds no matching product/);
+    assert.match(instruction,/not-in-our-catalog means say the team is checking whether the product can be supplied/);
     assert.match(instruction,/you must not ask the customer for its model, variant, specification or manufacturer reference/);
     assert.match(instruction,/needs-identification is the only case where you may ask the customer for identifying details/);
     assert.match(instruction,/Do not repeat the postal delivery address in the reply/);
+    assert.match(instruction,/Answer the customer's actual request first/);
+    assert.match(instruction,/Never tell the customer that our catalogue, ERP or internal systems hold no match/);
     return Response.json({candidates:[{content:{parts:[{functionCall:{name:'draft_inquiry_reply',args:{draft:'Hei Matti,\n\nEmme voi vielä vahvistaa pyydettyä FILTER-A20-määrää. Selvitämme täydennystä ja vaihtoehtoja. Lähetämme hinnan ja toimitusarvion yhtenä tarjouksena.\n\nYstävällisin terveisin,\nMyyntitiimi'}}}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:30}});
   });
   const inquiry:InquiryCase={intent:'inquiry',customerText:'Fictional Oy',senderName:'Matti',customer:'',condition:'saatavuutta',requestedDate:'15. lokakuuta 2026',deliveryAddress:'Testikatu 1, Helsinki',

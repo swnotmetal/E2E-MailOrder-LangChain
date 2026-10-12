@@ -4,13 +4,13 @@ import { type ERP } from './erp.js';
 import { catalogSearchTool, inventoryTool, type CatalogCandidate } from './model.js';
 import { templateExtractor, verifyEvidence, type Extractor } from './input.js';
 import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type Decision, type InquiryCase, type InquiryLine,
-  DecisionSchema, InquiryDecisionSchema, validate, normalize, digest, fields } from './domain.js';
+  DecisionSchema, InquiryDecisionSchema, validate, orderConformance, normalize, digest, fields } from './domain.js';
 
 const State = Annotation.Root({
   sources:Annotation<Source[]>(), extracted:Annotation<Extraction>(), draft:Annotation<Draft>(),
   customers:Annotation<Customer[]>(), items:Annotation<CatalogCandidate[]>(), addresses:Annotation<Address[]>(),
   availability:Annotation<InquiryLine[]>(),
-  issues:Annotation<Issue[]>(), status:Annotation<string>(), revision:Annotation<string>(),
+  issues:Annotation<Issue[]>(), status:Annotation<string>(), revision:Annotation<string>(), conformance:Annotation<string>(),
   decision:Annotation<unknown>(), inquiry:Annotation<InquiryCase>(), order:Annotation<string>(),
   audit:Annotation<unknown[]>({reducer:(a,b)=>a.concat(b),default:()=>[]})
 });
@@ -198,7 +198,7 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
         })};
       issues.push(...await checkERP(draft));
       if(draft.customer && draft.po && (await erp.duplicates(draft)).length) issues.push({code:'DUPLICATE_PO',field:'po',message:'ERP already contains this customer PO; commit will reconcile only an identical integration draft'});
-      return {draft,customers,items,addresses,issues,revision:digest([s.sources,draft]),status:'review'};
+      return {draft,customers,items,addresses,issues,conformance:orderConformance(s.extracted,issues),revision:digest([s.sources,draft]),status:'review'};
     })
     .addNode('review',s=>{
       let decision:Decision;
@@ -225,7 +225,10 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
         throw error; // Transport failures remain at this durable node for explicit retry.
       }
       if(order.docstatus!==0) throw Error('ERP_RETURNED_NON_DRAFT');
-      return {order:order.name,status:'created',issues:[]};
+      // Reached straight from match() this was an automatic proposal; reached from review()
+      // a human approved it first. The audit records which one happened.
+      return {order:order.name,status:'created',issues:[],
+        audit:s.conformance?[]:[{action:'auto-propose',actor:'assistant',revision:s.revision,reason:'deterministic validation passed; a human still reviews and submits this draft in the ERP'}]};
     })
     .addEdge(START,'extract')
     .addEdge('extract','resolveInventory')
@@ -233,7 +236,7 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
     .addEdge('prepareInquiry','draftInquiryReply')
     .addEdge('draftInquiryReply','inquiryReview')
     .addConditionalEdges('inquiryReview',s=>s.status==='inquiry-review'?'inquiryReview':END,['inquiryReview',END])
-    .addEdge('match','review')
+    .addConditionalEdges('match',s=>s.conformance?'review':'write',['review','write'])
     .addConditionalEdges('review',s=>s.status==='approved'?'write':s.status==='needs-info'?'review':END,['write','review',END])
     .addConditionalEdges('write',s=>s.status==='created'?END:'review',[END,'review'])
     .compile({checkpointer:saver});

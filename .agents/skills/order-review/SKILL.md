@@ -8,7 +8,7 @@ Only fictional local customer/order data belongs in fixtures. Never commit crede
 
 Preserve raw email and PDF-extracted text. Every extracted value needs source, page (PDF), exact quote and offsets into saved text. Missing or ambiguous values stay unresolved; never infer a model number from the first search result.
 
-LangGraph owns routing, interrupt and persisted checkpoints. Deterministic code validates quantities, required fields, approval and duplicate identity. Human approval applies to the reviewed revision, with a reason for resolving source conflicts. Revalidate after edits and before ERP writes.
+LangGraph owns routing, interrupt and persisted checkpoints. Deterministic code validates quantities, required fields, approval and duplicate identity, and it decides whether an order may be drafted in the ERP without waiting for a human. Human approval applies to the reviewed revision, with a reason for resolving source conflicts. Revalidate after edits and before ERP writes. This application never submits an order.
 
 ERPNext is the real integration target. Mock tests are development evidence only. Create Sales Orders with docstatus=0. Use an ERP-side unique integration key plus reconciliation after uncertain writes; GET-before-POST alone is not concurrency-safe. Never blindly retry a timeout POST.
 

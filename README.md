@@ -1,8 +1,8 @@
 # B2B Email Order Review Lab
 
-**What it solves.** A fictional B2B inbox-to-ERP problem: turning customer emails and text PDFs into reviewed order drafts, with ERP reads kept read-only and every ERP write behind human approval.
+**What it solves.** A fictional B2B inbox-to-ERP problem: turning customer emails and text PDFs into reviewed order drafts, with ERP reads kept read-only, ERP drafts created only for mail that passes deterministic validation, and no path in this application that submits an order.
 
-**What it demonstrates.** Bounded autonomy — deterministic validation before any write, human review interrupts, persisted checkpoints with replay recovery, and evidence traceable back to source text.
+**What it demonstrates.** Bounded autonomy — deterministic validation decides what may be written, human review interrupts handle everything that validation refuses, persisted checkpoints give replay recovery, and evidence stays traceable back to the source text.
 
 **Why it matters.** A concrete, honestly scoped pattern for bringing AI into enterprise workflows where audit, control, and reversibility matter more than raw automation.
 
@@ -22,7 +22,7 @@ It demonstrates:
 - read-only ERP lookups for customer, catalog, address, inventory, and pricing;
 - LangGraph interrupts, persisted checkpoints, and review/replay recovery;
 - deterministic validation before order writes;
-- human approval boundaries before ERP Draft writes;
+- human approval boundaries before ERP Draft writes for anything deterministic validation refuses, and no autonomous submission;
 - explicit audit, reconciliation, and benchmark reporting on fictional data.
 
 ## Flow
@@ -34,12 +34,14 @@ flowchart LR
   C --> D{Intent}
   D -->|purchase| E[Validate order against ERP]
   D -->|inquiry / conditional / unclear| F[Prepare reviewed reply]
-  E --> G[Human review interrupt]
+  E -->|conforming| I[Create docstatus=0 ERP Draft]
+  E -->|not conforming| G[Human review interrupt]
   F --> G
   G --> H{Human decision}
-  H -->|approve order| I[Revalidate + create ERP Draft]
+  H -->|approve order| I
   H -->|approve reply| J[Record approval; no email sent]
   H -->|request info / reject| K[Keep in review / close]
+  I --> M[Human reviews and submits in the ERP]
   L[(SQLite checkpoints)] -. resume .-> G
 ```
 
@@ -54,7 +56,7 @@ This project intentionally does not claim:
 - model autonomy over ERP writes;
 - zero false positives or zero false negatives in real-world mail traffic.
 
-The workflow validates extracted evidence and order constraints, then requires human review before an ERP Draft write. It does not claim to classify spam or provide inbox security; suspicious or irrelevant mail handling is outside the current implementation.
+The workflow validates extracted evidence and order constraints. A conforming purchase order is drafted in the ERP without waiting for a human; anything validation cannot settle stops at a human review interrupt instead. It does not claim to classify spam or provide inbox security; suspicious or irrelevant mail handling is outside the current implementation.
 
 ## Quick start
 
@@ -97,7 +99,7 @@ See [docs/verification.md](docs/verification.md), [docs/evaluation.md](docs/eval
 
 ## Negative results
 
-Not every experiment worked, and the failures are published rather than hidden. A bounded test of whether a local 0.8B decision model (**KEV**) could take over intent classification from the hosted model came back negative: purchase-intent recall was 1/6 on 24 human-reviewed fictional Finnish emails, and Finnish sentiment accuracy was 0.5867 on a 300-row sample. The experiment was paused, its generated artifacts were removed, and **no second model was added to the application** — the single-model policy in `AGENTS.md` still holds. See the [KEV Finnish experiment note](experiments/kev-finnish-poc/README.md) for the measured scope and limits.
+Not every experiment worked, and the failures are published rather than hidden. A bounded test of whether a local 0.8B decision model (**KEV**) could take over intent classification from the hosted model came back negative: purchase-intent recall was 1/6 on 24 human-reviewed fictional Finnish emails, and Finnish sentiment accuracy was 0.5867 on a 300-row sample. The experiment was paused, its generated artifacts were removed, and **no second model was added to the application** — the single-model policy in `AGENTS.md` still holds. See the [KEV Finnish experiment note](experiments/kev-finnish-poc/README.md) for the measured scope and limits. A second negative result is recorded in [the LangExtract compatibility spike](docs/langextract-spike.md): its character offsets did not reproduce the extraction against the original source string, so the package was not adopted.
 
 ## Other runnable paths
 
@@ -130,7 +132,7 @@ $env:ERP_ENV_FILE='.env.erp'
 npm run cli -- import fixtures/01-clean.eml fixtures/01-clean.pdf
 ```
 
-The workflow creates only `docstatus=0` Sales Order drafts after approval. It never gives the model ERP write credentials. Inventory tools are read-only, linked shipping addresses must already exist, and a timeout after POST is reconciled by the ERP integration key before any retry.
+The workflow creates only `docstatus=0` Sales Order drafts — automatically for conforming mail, otherwise after human approval. It never gives the model ERP write credentials and never submits an order. Inventory tools are read-only, linked shipping addresses must already exist, and a timeout after POST is reconciled by the ERP integration key before any retry.
 
 ## Architecture boundaries
 
@@ -177,7 +179,7 @@ npm run eval:langsmith -- candidates
 
 Review the ignored `data/english-candidate-review.json`. Its `humanVerified: false` marker must remain until a person checks every proposed value against the preserved source. The five 2026-09-24 candidates have now been checked by the repository owner and copied into the committed gold fixture; the original input-only fixture remains as the staging record.
 
-For a no-model observability exercise, `npm run trace:lab` publishes four explicitly synthetic traces covering a good control, a handled ERP tool error, a wrong-language semantic failure, and a safely unresolved catalog item. Follow [the LangSmith debugging lab](docs/langsmith-debug-lab.md) to inspect, annotate, monitor, and turn selected cases into a regression dataset.
+For a no-model observability exercise, `npm run trace:lab` publishes four explicitly synthetic traces covering a good control, a handled ERP tool error, a wrong-language semantic failure, and a safely unresolved catalog item. Follow [the LangSmith debugging lab](docs/langsmith-debug-lab.md) to inspect, annotate, monitor, and turn selected cases into a regression dataset. For a no-model blind exercise, `npm run trace:blind` runs one fictional email through the workflow with the reviewer questions listed in [the blind mailbox exercise](docs/langsmith-blind-mail.md).
 
 ## Repository hygiene and project scope
 
