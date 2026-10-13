@@ -1,0 +1,89 @@
+From: recruitment@nordicbuilders.no
+To: sales@example.invalid
+Subject: Application for Senior Project Manager - Ref: 99421
+Content-Type: text/plain; charset=utf-8
+
+Dear Hiring Team,
+
+I am writing to formally apply for the Senior Project Manager position at your Oslo branch, as advertised on your website. 
+
+Attached to this email, you will find my resume and cover letter detailing my 10+ years of experience in managing large-scale civil engineering projects across Scandinavia. I would appreciate the opportunity to discuss how my background aligns with your current team needs.
+
+Could you please confirm receipt of this application?
+
+Best regards,
+Lars Simmonsen
+Nordic Builders AS
+Prinsens gate 12, 0152 Oslo, Norway
+
+
+
+
+----------
+
+From: sourcing@automotive-solutions.mx
+To: sales@example.invalid
+Subject: Capability Inquiry: Custom Hardware and Components
+Content-Type: text/plain; charset=utf-8
+
+Hi Sales Team,
+
+I hope this email finds you well. 
+
+We are currently evaluating new international suppliers for our upcoming manufacturing cycle in Q3. Our production lines require a steady supply of high-grade industrial hardware, metal brackets, and various automotive aftermarket components.
+
+Do you have a product catalog or a line card you could share with us? Additionally, we would like to know your standard lead times for shipping to Monterrey, Mexico, and whether you support custom OEM manufacturing based on technical drawings.
+
+If your capabilities match our requirements, we would be happy to schedule a brief introductory call next week.
+
+Regards,
+Sofia Rodriguez
+Procurement Officer | Automotive Solutions SA
+Av. Constitución 456, Monterrey, 64000, Mexico
+
+----
+
+From: purchasing@tokyo-machinery.jp
+To: sales@example.invalid
+Subject: RFQ: Heavy Duty Air Filters & Fasteners
+Content-Type: text/plain; charset=utf-8
+
+Dear Sir/Madam,
+
+Please provide your best price and availability for the following items. This is for an urgent replacement project, and we need the goods delivered to our Yokohama facility by early next month.
+
+Items Requested:
+1. AMBIG-12V Basic home thermostat  - 15 units
+2. Stainless Steel Hex Bolts (M12 x 50mm) - 500 pcs
+3. Automotive Air Intake Filter (Model B) - 30 units
+
+Delivery Address:
+Tokyo Machinery Corp.
+2-Chome Minatomirai, Nishi Ward, Yokohama, 220-0012, Japan
+
+Required Delivery Date: 2027-01-15
+
+Please include the shipping cost (CIF Yokohama) and specify your payment terms in the quotation. We look forward to your prompt response.
+
+Thank you,
+Kenji Tanaka
+Sourcing Manager | Tokyo Machinery Corp.
+
+
+------
+From: orders@oz-hardware.com.au
+To: sales@example.invalid
+Subject: PURCHASE ORDER: OZ-2027-889
+Content-Type: text/plain; charset=utf-8
+
+Customer: OZ Hardware Logistics
+PO: OZ-2027-889
+Delivery: 2027-03-05
+Address: 45 George Street, Sydney, NSW 2000, Australia
+
+Line Items:
+Item: Fuel Filter Assembly | 20 | Nos
+Item: THERM-P1 Pro, HVAC | 10 | Nos
+Item: AMBIG-24V,Standard Relay 24V | 100 | Nos
+
+Notes: Please reply to this email to acknowledge receipt of the PO and confirm the dispatch date. Invoice should be billed to the address above.

@@ -69,6 +69,106 @@ test('a purchase with any unresolved issue still stops behind the human interrup
     assert.equal(s.values.audit.length,0);
   }finally{await x.close();}
 });
+const inquiryText='Hello, we would like 5 FILTER-A10 for our workshop.\n\nBest regards,\nMatti';
+function inquiryExtractor(text:string,item='FILTER-A10',quantity='5') {
+  const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+  const empty={value:'',evidence:{source:'email' as const,page:0,start:0,end:0,quote:''}};
+  return async()=>({facts:{customer:[],sender:[fact('Matti')],location:[],po:[],date:[],address:[]},
+    intent:{kind:'inquiry' as const,evidence:fact('would like')},
+    lines:[{description:fact(item),quantity:fact(quantity),unit:empty}]});
+}
+test('dash-separated codes like AMBIG-24V resolve uniquely instead of staying unresolved',async()=>{
+  const x=await setup();try{
+    const text='Item: Fuel Filter Assembly | 20 | Nos\nItem: THERM-P1 Pro | 10 | Nos\nItem: AMBIG-24V Relay | 100 | Nos';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[],sender:[],location:[],po:[],date:[],address:[]},
+      intent:{kind:'purchase' as const,evidence:fact('Item:')},
+      lines:[{description:fact('Fuel Filter Assembly'),quantity:fact('20'),unit:fact('Nos')},
+             {description:fact('THERM-P1 Pro'),quantity:fact('10'),unit:fact('Nos')},
+             {description:fact('AMBIG-24V Relay'),quantity:fact('100'),unit:fact('Nos')}]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('dash-code'));
+    const s=await graph.getState(config('dash-code'));
+    assert.deepEqual(s.values.draft.lines.map((line:any)=>line.item),['','THERM-P1','AMBIG-24V']);
+  }finally{await x.close();}
+});
+test('a human-confirmed new customer is created before the order is written',async()=>{
+  const x=await setup();try{
+    const text='Customer: Kiviniemi Oy\nPO: KV-2027-001\nDelivery: 2027-03-05\nAddress: 10 Katu, Helsinki, 00100, Finland\nItem: FILTER-A10 | 5 | Nos';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[fact('Kiviniemi Oy')],sender:[],location:[],po:[fact('KV-2027-001')],date:[fact('2027-03-05')],address:[fact('10 Katu, Helsinki, 00100, Finland')]},
+      intent:{kind:'purchase' as const,evidence:fact('Item:')},
+      lines:[{description:fact('FILTER-A10'),quantity:fact('5'),unit:fact('Nos')}]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('new-customer'));
+    const s=await graph.getState(config('new-customer'));
+    // Stops at review: the customer is unknown, and the AI only proposes, never creates.
+    assert.equal(s.values.status,'review');
+    assert.equal(s.values.newCustomer.name,'Kiviniemi Oy');
+    assert.equal(s.values.newCustomer.address,'10 Katu, Helsinki, 00100, Finland');
+    assert.equal(x.mock.createdCustomers.length,0);
+    const decision={action:'approve',revision:s.values.revision,actor:'test-operator',reason:'New customer confirmed',draft:s.values.draft,newCustomer:{name:'Kiviniemi Oy',address:'10 Katu, Helsinki, 00100, Finland'}};
+    await graph.invoke(new Command({resume:decision}),config('new-customer'));
+    const done=await graph.getState(config('new-customer'));
+    assert.equal(done.values.status,'created');
+    assert.equal(done.values.order,'MOCK-SO-1');
+    assert.equal(x.mock.createdCustomers.length,1);
+    assert.equal(x.mock.createdCustomers[0].name,'Kiviniemi Oy');
+    assert.equal(done.values.draft.customer,'Kiviniemi Oy');
+  }finally{await x.close();}
+});
+test('a conforming inquiry is filed as an ERP work item without a human interrupt',async()=>{
+  const x=await setup();try{
+    const graph=workflow(x.erp,x.saver,inquiryExtractor(inquiryText));
+    await graph.invoke({sources:[{source:'email',page:0,text:inquiryText}]},config('auto-inquiry'));
+    const s=await graph.getState(config('auto-inquiry'));
+    assert.equal(s.values.conformance,'');
+    assert.equal(s.values.status,'suggested');
+    assert.equal(s.tasks.length,0);
+    assert.equal(x.mock.posts,0);
+    assert.equal(x.mock.suggestions,1);assert.equal(s.values.suggestion,'MOCK-TODO-1');
+    assert.equal(s.values.audit.length,1);
+    assert.equal(s.values.audit[0].action,'suggest-reply');
+    assert.equal(s.values.audit[0].actor,'assistant');
+    const todo=x.mock.todos[0];
+    assert.equal(todo.status,'Open');
+    // No single ERP customer was matched, so the work item carries no link rather than a guess.
+    assert.equal(todo.reference_name,undefined);
+    assert.match(todo.description,/^Inquiry from Matti \(not matched to an ERP customer\) — inquiry/);
+    // The human sees the exact suggested text in the ERP, not a summary of it.
+    assert.ok(todo.description.includes(s.values.inquiry.responseDraft));
+    // Re-ingesting the same mail reconciles to that work item instead of filing a second one, and
+    // the identity is the message rather than the model prose: a reworded reply still reconciles.
+    const reworded=workflow(x.erp,x.saver,inquiryExtractor(inquiryText),async()=>({draft:'Reworded reply for the same message.',language:'en'}));
+    await reworded.invoke({sources:[{source:'email',page:0,text:inquiryText}]},config('auto-inquiry-again'));
+    const again=await reworded.getState(config('auto-inquiry-again'));
+    assert.equal(x.mock.suggestions,1);assert.equal(again.values.suggestion,'MOCK-TODO-1');
+  }finally{await x.close();}
+});
+test('only an automatic proposal notifies, and a dead notice channel never unwinds the ERP write',async()=>{
+  const x=await setup();try{
+    const notices:any[]=[];let fail=false;
+    const notifier=async(notice:any)=>{if(fail) throw Error('SMTP_DOWN');notices.push(notice);};
+    const graph=workflow(x.erp,x.saver,inquiryExtractor(inquiryText),undefined,notifier);
+    await graph.invoke({sources:[{source:'email',page:0,text:inquiryText}]},config('notify-ok'));
+    const s=await graph.getState(config('notify-ok'));
+    assert.equal(s.values.status,'suggested');assert.equal(x.mock.suggestions,1);
+    assert.equal(notices.length,1);assert.equal(notices[0].kind,'reply-suggestion');
+    assert.equal(notices[0].reference,s.values.suggestion);assert.equal(notices[0].customer,'');
+    assert.equal(s.values.audit.length,1);
+    // A run that stops at the interrupt filed no proposal, so it notifies nobody.
+    const unclear=workflow(x.erp,x.saver,async()=>({facts:{customer:[],sender:[],location:[],po:[],date:[],address:[]},lines:[],reply:{language:'en'},
+      warnings:[{code:'UNRESOLVED_MODEL_EVIDENCE',field:'intent',message:'Confirm intent from the original message'}]}),undefined,notifier);
+    await unclear.invoke({sources:[{source:'email',page:0,text:'A fictional unclear email.'}]},config('notify-interrupt'));
+    assert.equal(notices.length,1);assert.equal(x.mock.suggestions,1);
+    // A dead notification channel must not fail the run or hide the work item already filed.
+    fail=true;
+    const secondText='Hello, we would like 3 FILTER-A20.\n\nBest regards,\nMatti';
+    const second=workflow(x.erp,x.saver,inquiryExtractor(secondText,'FILTER-A20','3'),undefined,notifier);
+    await second.invoke({sources:[{source:'email',page:0,text:secondText}]},config('notify-failed'));
+    const f=await second.getState(config('notify-failed'));
+    assert.equal(f.values.status,'suggested');assert.equal(x.mock.suggestions,2);assert.equal(notices.length,1);
+    assert.equal(f.values.audit.length,2);assert.equal(f.values.audit[1].action,'notify-failed');
+  }finally{await x.close();}
+});
 test('clean order interrupts before HTTP write then creates a draft',async()=>{
   const x=await setup();try {
     await x.graph.invoke({sources:await sources()},config());
@@ -178,22 +278,41 @@ test('catalog queries have bounded terms and reject oversized descriptions',asyn
   assert.equal(orFilters.length,16);
   assert.throws(()=>erp.findItems('x'.repeat(501)),/CATALOG_QUERY_LIMIT/);
 });
-test('inquiry and conditional intents use reply review without order validation or ERP writes',async()=>{
+test('inquiry and conditional intents skip order validation; unclear intent keeps the human interrupt',async()=>{
   for(const kind of ['inquiry','conditional','unclear'] as const){
     const x=await setup();try{
       const graph=workflow(x.erp,x.saver,async input=>{const e=await templateExtractor(input);return {...e,intent:{kind,evidence:e.facts.po[0]}};});
       await graph.invoke({sources:await sources()},config());
       const s=await graph.getState(config());
-      assert.equal(s.values.status,'inquiry-review');assert.deepEqual(s.values.issues,[]);
+      assert.deepEqual(s.values.issues,[]);
       assert.equal(s.values.inquiry.lines[0].itemCode,'FILTER-A10');assert.equal(s.values.inquiry.lines[0].inventory.totalActualQty,12);
-      assert.match(s.values.inquiry.responseDraft,/checking whether the requested quantity of 5 can be allocated/);
-      assert.match(s.values.inquiry.responseDraft,/consolidated quotation will include pricing/);
-      assert.doesNotMatch(s.values.inquiry.responseDraft,/ERP|stock is 12/);
-      assert.doesNotMatch(s.values.inquiry.responseDraft,/No order has been created/);
-      assert.equal((s.tasks[0].interrupts[0].value as any).kind,'inquiry');
-      const decision:InquiryDecision={action:'approve-reply',revision:s.values.revision,actor:'test-operator',reason:'Checked fictional reply',responseDraft:s.values.inquiry.responseDraft};
-      await graph.invoke(new Command({resume:decision}),config());
-      assert.equal((await graph.getState(config())).values.status,'response-approved');assert.equal(x.mock.posts,0);
+      if(kind!=='unclear') {
+        assert.match(s.values.inquiry.responseDraft,/checking whether the requested quantity of 5 can be allocated/);
+        assert.match(s.values.inquiry.responseDraft,/consolidated quotation will include pricing/);
+        assert.doesNotMatch(s.values.inquiry.responseDraft,/ERP|stock is 12/);
+        assert.doesNotMatch(s.values.inquiry.responseDraft,/No order has been created/);
+      }
+      assert.equal(x.mock.posts,0);
+      if(kind==='unclear') {
+        // An unclear intent generates no reply: it stops at the interrupt with an empty draft, and
+        // approving an empty draft is refused rather than filing a nonsense work item.
+        assert.equal(s.values.status,'inquiry-review');
+        assert.equal(s.values.conformance,'the intent is not a determinate inquiry');
+        assert.equal(s.values.inquiry.responseDraft,'');
+        assert.equal((s.tasks[0].interrupts[0].value as any).kind,'inquiry');
+        assert.equal(x.mock.suggestions,0);
+        const empty:InquiryDecision={action:'approve-reply',revision:s.values.revision,actor:'test-operator',reason:'tried to approve an empty reply',responseDraft:''};
+        await graph.invoke(new Command({resume:empty}),config());
+        const refused=await graph.getState(config());
+        assert.equal(refused.values.status,'inquiry-review');assert.equal(x.mock.suggestions,0);
+        assert.match((refused.tasks[0].interrupts[0].value as any).feedback,/REPLY_DRAFT_EMPTY/);
+        const closed:InquiryDecision={action:'close',revision:refused.values.revision,actor:'test-operator',reason:'Not a customer request',responseDraft:''};
+        await graph.invoke(new Command({resume:closed}),config());
+        assert.equal((await graph.getState(config())).values.status,'closed');assert.equal(x.mock.suggestions,0);
+      } else {
+        assert.equal(s.values.conformance,'');assert.equal(s.values.status,'suggested');assert.equal(s.tasks.length,0);
+        assert.equal(x.mock.suggestions,1);assert.equal(x.mock.todos[0].reference_name,s.values.inquiry.customer);
+      }
     }finally{await x.close();}
   }
 });
@@ -207,7 +326,8 @@ test('a unique model token maps conversational A10 text without weakening generi
       intent:{kind:'conditional' as const,evidence:fact('interested')},lines:[{description:fact('type a10 filters'),quantity:fact('50'),unit:empty}]}));
     await graph.invoke({sources:input},config('model-token'));
     const s=await graph.getState(config('model-token'));
-    assert.equal(s.values.inquiry.lines[0].itemCode,'FILTER-A10');assert.equal(s.values.status,'inquiry-review');assert.equal(x.mock.posts,0);
+    assert.equal(s.values.inquiry.lines[0].itemCode,'FILTER-A10');assert.equal(s.values.status,'suggested');assert.equal(x.mock.posts,0);
+    assert.equal(x.mock.suggestions,1);
   }finally{await x.close();}
 });
 test('fuzzy catalog candidates are ranked for review but never auto-selected',async()=>{
@@ -271,7 +391,7 @@ test('reply drafting runs after read-only inventory and preserves the requested 
     await graph.invoke({sources:[{source:'email',page:0,text}]},config('finnish-reply'));
     const s=await graph.getState(config('finnish-reply'));
     assert.equal(received.lines[0].inventory.totalActualQty,0);assert.equal(received.lines[0].status,'out-of-stock');
-    assert.equal(s.values.status,'inquiry-review');assert.equal(s.values.inquiry.replyLanguage,'fi');assert.match(s.values.inquiry.responseDraft,/Hei Matti/);
+    assert.equal(s.values.status,'suggested');assert.equal(s.values.inquiry.replyLanguage,'fi');assert.match(s.values.inquiry.responseDraft,/Hei Matti/);
     assert.equal(s.values.inquiry.replyModel,'gemini-2.5-flash-lite');assert.equal(s.values.inquiry.replyTraceId,'fictional-reply-trace');assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });
@@ -337,7 +457,8 @@ test('missing grounded intent goes to human inquiry review, never the order path
     await graph.invoke({sources:[{source:'email',page:0,text}]},config('unresolved-intent'));
     const values=(await graph.getState(config('unresolved-intent'))).values;
     assert.equal(values.status,'inquiry-review');assert.equal(values.inquiry.intent,'unclear');assert.equal(x.mock.posts,0);
-    assert.ok(values.inquiry.needs.some((need:string)=>need.includes('intent')));
+    assert.equal(values.inquiry.responseDraft,'');
+    assert.ok(values.inquiry.needs.some((need:string)=>need.includes('not a clear purchase or inquiry')));
   }finally{await x.close();}
 });
 test('same PO with changed approved content is never silently reused',async()=>{

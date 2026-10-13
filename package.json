@@ -10,6 +10,7 @@
     "learn": "tsx scripts/learn.ts",
     "mock:erp": "tsx scripts/mock-erp-server.ts",
     "mail:send": "tsx scripts/send-mail.ts",
+    "mail:tests": "tsx scripts/send-mail-tests.ts",
     "mail:ingest": "tsx scripts/mail-ingest.ts",
     "check": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",

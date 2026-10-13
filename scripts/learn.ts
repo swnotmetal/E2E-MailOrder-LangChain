@@ -7,10 +7,11 @@ import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { z } from 'zod';
 import { mockERP } from '../src/mock-erp.js';
 import { FrappeERP } from '../src/erp.js';
-import { workflow } from '../src/workflow.js';
+import { workflow, type ProposalNotifier } from '../src/workflow.js';
 import { readSources } from '../src/input.js';
 import { DecisionSchema, InquiryDecisionSchema, type Decision, type InquiryDecision, type Source } from '../src/domain.js';
 import { inventoryTool, geminiInquiryReply, geminiMailExtractor, recordHumanReviewFeedback } from '../src/model.js';
+import { createTransport } from 'nodemailer';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -26,6 +27,20 @@ export async function startLearningLab(port=3210) {
   const ownedMock=remoteMockBase?null:await mockERP();
   const erpBase=remoteMockBase||ownedMock!.url;
   const erp=new FrappeERP(erpBase,process.env.LEARN_ERP_AUTH??'token test:test',process.env.LEARN_ERP_COMPANY??'Nordic Parts Demo');
+  // Opt-in: LEARN_NOTIFY_TO (for example reviewers@example.invalid) sends an internal notice over
+  // the same local SMTP the inbox already uses. The model never sends anything, this fires only
+  // when the application itself filed a proposal, and the notice is never sent to the customer.
+  const notifyTo=process.env.LEARN_NOTIFY_TO?.trim();
+  const notifyFrom='review-lab@example.invalid';
+  const notify:ProposalNotifier=notifyTo?async notice=>{
+    const [host,port]=(process.env.MAILPIT_SMTP??'127.0.0.1:1025').split(':');
+    const transport=createTransport({host,port:Number(port),secure:false,ignoreTLS:true});
+    try {
+      await transport.sendMail({from:`"Order review lab" <${notifyFrom}>`,to:notifyTo,
+        subject:`${notice.kind==='order-draft'?'Order draft proposed':'Reply suggestion filed'}: ${notice.reference}`,
+        text:`${notice.summary}\n\nFiled in the ERP as ${notice.reference}. A human still has to review and act on it there.`});
+    } finally {transport.close();}
+  }:async()=>{};
   const resetMock=async()=>{
     if(ownedMock) {ownedMock.reset();return;}
     const response=await fetch(`${erpBase}/__mock/reset`,{method:'POST'});
@@ -33,13 +48,14 @@ export async function startLearningLab(port=3210) {
   };
   const mockWrites=async()=>{
     if(ownedMock) return ownedMock.posts;
-    const response=await fetch(`${erpBase}/__mock/status`);
-    if(!response.ok) throw Error(`MOCK_STATUS_HTTP_${response.status}`);
-    return Number((await response.json() as {posts:number}).posts);
+    // Only the mock server reports a write counter. A real ERP has none, and that must not
+    // turn a completed run into a failed request: this number is informational only.
+    const response=await fetch(`${erpBase}/__mock/status`).catch(()=>null);
+    return response?.ok?Number((await response.json() as {posts:number}).posts):null;
   };
   const saver=SqliteSaver.fromConnString(':memory:');
-  const graph=workflow(erp,saver);
-  const modelGraph=workflow(erp,saver,geminiMailExtractor(resolve('data')),geminiInquiryReply(resolve('data')));
+  const graph=workflow(erp,saver,undefined,undefined,notify);
+  const modelGraph=workflow(erp,saver,geminiMailExtractor(resolve('data')),geminiInquiryReply(resolve('data')),notify);
   const threads=new Set<string>();
   const mailbox=new Map<string,{subject:string;events:unknown[];error?:string}>();
   const inventory=inventoryTool(erp);
@@ -64,19 +80,26 @@ export async function startLearningLab(port=3210) {
   // A real deployment watches its mailbox; so does this one. Set LEARN_MAILPIT=off to disable.
   const mailpitBase=process.env.MAILPIT_HTTP?.trim()||'http://127.0.0.1:8025';
   const mailpitUsesModel=process.env.LEARN_MAILPIT_MODE?.trim().toLowerCase()==='gemini';
+  let polling=false;
   if(process.env.LEARN_MAILPIT?.trim().toLowerCase()!=='off') {
     setInterval(async()=>{
-      if(busy) return;
+      // Without an in-flight guard the next tick re-ingests everything this tick is still awaiting,
+      // and the model makes those calls again.
+      if(busy||polling) return;
+      polling=true;
       try {
-        const listing=await (await fetch(`${mailpitBase}/api/v1/messages`)).json() as {messages:{ID:string;Subject:string}[]};
+        const listing=await (await fetch(`${mailpitBase}/api/v1/messages`)).json() as {messages:{ID:string;Subject:string;From?:{Address:string}}[]};
         for(const message of listing.messages) {
           if(seenMailpit.has(message.ID)) continue;
+          // Our own outbound notice shares this inbox; it is not incoming mail to ingest.
+          if(message.From?.Address===notifyFrom) {seenMailpit.add(message.ID);continue;}
           const raw=Buffer.from(await (await fetch(`${mailpitBase}/api/v1/message/${message.ID}/raw`)).arrayBuffer());
-          await ingestRaw(message.Subject,raw,false);
+          await ingestRaw(message.Subject,raw,mailpitUsesModel);
           seenMailpit.add(message.ID);
           console.log(`Mailpit: ingested "${message.Subject}"`);
         }
       } catch { /* Mailpit not running is not an error. */ }
+      finally {polling=false;}
     },3000).unref();
   }
   const server=createServer(async(req,res)=>{
@@ -123,14 +146,15 @@ export async function startLearningLab(port=3210) {
         }
         if(req.url==='/api/mailpit') {
           const base=process.env.MAILPIT_HTTP?.trim()||'http://127.0.0.1:8025';
-          let listing:{messages:{ID:string;Subject:string}[]};
-          try {listing=await (await fetch(`${base}/api/v1/messages`)).json() as {messages:{ID:string;Subject:string}[]};}
+          let listing:{messages:{ID:string;Subject:string;From?:{Address:string}}[]};
+          try {listing=await (await fetch(`${base}/api/v1/messages`)).json() as {messages:{ID:string;Subject:string;From?:{Address:string}}[]};}
           catch {throw Error('MAILPIT_UNAVAILABLE: start it with infra/start-mailpit.ps1');}
           const pulled:string[]=[];
           for(const message of listing.messages) {
             if(seenMailpit.has(message.ID)) continue;
+            if(message.From?.Address===notifyFrom) {seenMailpit.add(message.ID);continue;}
             const raw=Buffer.from(await (await fetch(`${base}/api/v1/message/${message.ID}/raw`)).arrayBuffer());
-            await ingestRaw(message.Subject,raw,false);
+            await ingestRaw(message.Subject,raw,mailpitUsesModel);
             seenMailpit.add(message.ID);pulled.push(message.Subject);
           }
           res.end(JSON.stringify({pulled}));return;
@@ -176,7 +200,7 @@ export async function startLearningLab(port=3210) {
         if(humanDecision) {
           const runId=state.values.inquiry?.replyTraceId??state.values.extracted?.traceId;
           if(runId) try {
-            const correction='responseDraft' in humanDecision?{responseDraft:humanDecision.responseDraft}:{draft:humanDecision.draft};
+            const correction='draft' in humanDecision?{draft:humanDecision.draft}:{responseDraft:humanDecision.responseDraft};
             feedback={id:await recordHumanReviewFeedback(runId,{action:humanDecision.action,actor:humanDecision.actor,reason:humanDecision.reason,correction})};
           } catch(error) {feedback={error:error instanceof Error?error.message:'Unknown feedback error'};}
         }

@@ -8,6 +8,11 @@
         "action": {
           "tools": [
             "apply_patch",
+            "create_file",
+            "createFile",
+            "editFiles",
+            "insert_edit_into_file",
+            "replace_string_in_file",
             "Edit",
             "Write"
           ],

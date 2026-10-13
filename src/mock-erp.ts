@@ -33,7 +33,10 @@ export async function mockERP(port=0) {
     custom_integration_key:first.Integration_Key,custom_review_digest:`fixture:${first.Integration_Key}`,docstatus:first.Status==='Draft'?0:1,
     items:lines.map(line=>({item_code:line.Item_Code,qty:Number(line.Qty_Sold),uom:'Nos',rate:Number(line.Unit_Price_EUR)}))};});
   const orders:Order[]=[]; let posts=0; let timeoutAfterCommit=false; let getFails=false;
-  const reset=()=>{orders.length=0;posts=0;timeoutAfterCommit=false;getFails=false;};
+  const todos:{name:string;description:string;reference_type?:string;reference_name?:string;status:string}[]=[]; let suggestions=0;
+  const createdCustomers:{name:string;customer_name:string;disabled:number}[]=[];
+  const createdAddresses:{name:string;customer_id:string;address_line1:string;address_line2:string;city:string;country:string;pincode:string;state?:string;disabled:number}[]=[]; let addrPosts=0;
+  const reset=()=>{orders.length=0;posts=0;timeoutAfterCommit=false;getFails=false;todos.length=0;suggestions=0;createdCustomers.length=0;createdAddresses.length=0;};
   const server=createServer(async(req,res)=>{
     const url=new URL(req.url!,'http://localhost');
     res.setHeader('Content-Type','application/json');
@@ -53,8 +56,26 @@ export async function mockERP(port=0) {
       }
       res.end(JSON.stringify({data:order}));return;
     }
-    const data:Record<string,unknown[]>={
-      Customer:customers,Item:items,Bin:bins,Address:addresses,'Sales Order':[...orders,...historicalOrders]
+    if(req.method==='POST' && doc==='ToDo') {
+      let raw='';for await(const chunk of req) raw+=chunk;
+      const todo={...JSON.parse(raw),name:`MOCK-TODO-${++suggestions}`};todos.push(todo);
+      res.end(JSON.stringify({data:todo}));return;
+    }
+    if(req.method==='POST' && doc==='Customer') {
+      let raw='';for await(const chunk of req) raw+=chunk;
+      const body=JSON.parse(raw);
+      const customer={name:body.customer_name,customer_name:body.customer_name,disabled:0};
+      createdCustomers.push(customer);res.end(JSON.stringify({data:customer}));return;
+    }
+    if(req.method==='POST' && doc==='Address') {
+      let raw='';for await(const chunk of req) raw+=chunk;
+      const body=JSON.parse(raw);
+      const link=Array.isArray(body.links)?body.links[0]:undefined;
+      const address={name:`MOCK-ADDR-${++addrPosts}`,customer_id:link?.link_name??'',address_line1:body.address_line1??'',address_line2:'',city:body.city??'',country:body.country??'',pincode:body.pincode??'',state:body.state,disabled:0};
+      createdAddresses.push(address);res.end(JSON.stringify({data:address}));return;
+    }
+    const data:Record<string,unknown[]>={ 
+      Customer:[...customers,...createdCustomers],Item:items,Bin:bins,Address:[...addresses,...createdAddresses],'Sales Order':[...orders,...historicalOrders],ToDo:todos
     };
     let rows=data[doc]??[];
     const filters=JSON.parse(url.searchParams.get('filters')??'[]') as unknown[][];
@@ -76,7 +97,7 @@ export async function mockERP(port=0) {
     res.end(JSON.stringify({data:rows}));
   });
   await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
-  return {url:`http://127.0.0.1:${(server.address() as {port:number}).port}`,orders,get posts(){return posts;},
+  return {url:`http://127.0.0.1:${(server.address() as {port:number}).port}`,orders,get posts(){return posts;},todos,get suggestions(){return suggestions;},createdCustomers,
     timeout(){timeoutAfterCommit=true;},failReads(on:boolean){getFails=on;},reset,
     close:()=>new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()))};
 }

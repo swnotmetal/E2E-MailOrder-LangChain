@@ -33,15 +33,17 @@ flowchart LR
   B --> C[Read-only catalog and inventory lookup]
   C --> D{Intent}
   D -->|purchase| E[Validate order against ERP]
-  D -->|inquiry / conditional / unclear| F[Prepare reviewed reply]
+  D -->|inquiry / conditional / unclear| F[Prepare reply suggestion]
   E -->|conforming| I[Create docstatus=0 ERP Draft]
   E -->|not conforming| G[Human review interrupt]
-  F --> G
+  F -->|conforming| N[File reply suggestion as an ERP work item]
+  F -->|not conforming| G
   G --> H{Human decision}
   H -->|approve order| I
-  H -->|approve reply| J[Record approval; no email sent]
+  H -->|approve reply| N
   H -->|request info / reject| K[Keep in review / close]
   I --> M[Human reviews and submits in the ERP]
+  N --> O[Human reviews and sends the reply]
   L[(SQLite checkpoints)] -. resume .-> G
 ```
 
@@ -132,7 +134,7 @@ $env:ERP_ENV_FILE='.env.erp'
 npm run cli -- import fixtures/01-clean.eml fixtures/01-clean.pdf
 ```
 
-The workflow creates only `docstatus=0` Sales Order drafts — automatically for conforming mail, otherwise after human approval. It never gives the model ERP write credentials and never submits an order. Inventory tools are read-only, linked shipping addresses must already exist, and a timeout after POST is reconciled by the ERP integration key before any retry.
+The workflow writes exactly two things, and neither is irreversible: a `docstatus=0` Sales Order draft for purchase mail, and a reply suggestion filed as an ERP work item for inquiry mail. Both are written automatically when the message passes deterministic conformance, and after human approval otherwise. It never gives the model ERP write credentials, never submits an order, and never sends mail to the customer. The only outbound mail is an opt-in internal notice that a proposal was filed — set `LEARN_NOTIFY_TO` and it goes over the same localhost SMTP the inbox uses, and a failed notice is recorded in the audit without undoing the ERP write. Inventory tools are read-only, linked shipping addresses must already exist, and both writes reconcile against an existing record before retrying.
 
 ## Architecture boundaries
 

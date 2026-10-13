@@ -14,6 +14,7 @@ export type Extraction = { facts: Record<FactField, Fact[]>; lines: { descriptio
 export type Customer = { name: string; customer_name: string };
 export type Item = { name: string; item_name: string; stock_uom: string; disabled?: number };
 export type Address = { name: string; text: string };
+export type NewCustomer = { name: string; address?: string };
 export type InquiryLine = {
   itemText:string; itemCode:string; quantity:string;
   status:'recorded-stock'|'out-of-stock'|'untracked'|'unresolved'|'catalog-miss'|'lookup-failed';
@@ -31,12 +32,13 @@ export const DraftSchema = z.object({
 export type Draft = z.infer<typeof DraftSchema>;
 export const DecisionSchema = z.object({
   action: z.enum(['approve', 'reject', 'request-info']), revision: z.string(),
-  actor: z.string().trim().min(1), reason: z.string(), draft: DraftSchema, confirmPurchase:z.boolean().optional()
+  actor: z.string().trim().min(1), reason: z.string(), draft: DraftSchema, confirmPurchase:z.boolean().optional(),
+  newCustomer: z.object({ name: z.string().trim().min(1), address: z.string().trim().optional() }).optional()
 }).strict();
 export type Decision = z.infer<typeof DecisionSchema>;
 export const InquiryDecisionSchema=z.object({
   action:z.enum(['approve-reply','request-info','close']),revision:z.string(),actor:z.string().trim().min(1),
-  reason:z.string(),responseDraft:z.string().trim().min(1)
+  reason:z.string(),responseDraft:z.string().trim().optional()
 }).strict();
 export type InquiryDecision=z.infer<typeof InquiryDecisionSchema>;
 export const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -51,7 +53,7 @@ export function validate(d: Draft): Issue[] {
   if (!validDate(d.date)) issues.push({code:'INVALID_DATE', field:'date', message:'Use a valid YYYY-MM-DD date'});
   if (!d.lines.length) issues.push({code:'MISSING_LINES',field:'lines',message:'At least one line required'});
   d.lines.forEach((l,i) => {
-    if (!l.item) issues.push({code:'UNRESOLVED_ITEM',field:`lines.${i}.item`,message:'Select an exact ERP item'});
+    if (!l.item) issues.push({code:'UNRESOLVED_ITEM',field:`lines.${i}.item`,message:'No exact ERP item matched — map it to an existing item or remove this line'});
     if (!/^[1-9]\d{0,8}$/.test(l.quantity)) issues.push({code:'INVALID_QUANTITY',field:`lines.${i}.quantity`,message:'Only positive whole quantities (up to 999999999) supported'});
     if (!l.unit) issues.push({code:'MISSING_UNIT',field:`lines.${i}.unit`,message:'Unit required'});
   });
@@ -74,3 +76,4 @@ export function inquiryConformance(extracted: Extraction, replyDraft: string): s
   if (!replyDraft.trim()) return 'the reply draft is empty';
   return '';
 }
+// miko-enforcement-probe

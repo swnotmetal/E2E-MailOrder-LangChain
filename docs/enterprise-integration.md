@@ -43,14 +43,14 @@ Microsoft Graph / Gmail API / IMAP webhook
 | LangGraph | Classify, extract, route, interrupt, and checkpoint | Resume from a persisted node without repeating confirmed side effects |
 | Read-only ERP tools | Look up customers, catalog, inventory, price, and lead time | Mark unavailable facts as unknown; do not invent an answer or switch models |
 | Human review | Edit drafts, explain conflicts, approve an exact revision | Reject stale approval and require review of the latest content |
-| ERP write worker | Revalidate, create a `docstatus=0` Draft, enforce idempotency, reconcile | After an uncertain POST, reconcile by unique key before deciding whether to retry |
+| ERP write worker | Revalidate, create a `docstatus=0` Draft or file a reply suggestion as a work item, enforce idempotency, reconcile | After an uncertain POST, reconcile by unique key before deciding whether to retry |
 | Email outlet | Send an approved reply and retain the thread ID | Use a send idempotency key; a send failure does not roll back an ERP result |
 
 ## Mapping to this repository
 
 - `src/model.ts`: the fixed Gemini 2.5 Flash-Lite understanding boundary; it has no ERP write permission.
 - `src/workflow.ts`: LangGraph routing, interrupts, revision semantics, and checkpoints.
-- `src/erp.ts`: ERPNext REST adapter; types separate inventory reads from Draft writes.
+- `src/erp.ts`: ERPNext REST adapter; types separate inventory reads from the two writes — a `docstatus=0` Sales Order draft, and a reply suggestion filed as a `ToDo` work item.
 - `src/learn.html` and `scripts/learn.ts`: a single-machine learning UI, not an enterprise connector or production review console.
 - `test/mock-erp.ts`: a development test double; its results are mock evidence only.
 

@@ -3,27 +3,33 @@ import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { type ERP } from './erp.js';
 import { catalogSearchTool, inventoryTool, type CatalogCandidate } from './model.js';
 import { templateExtractor, verifyEvidence, type Extractor } from './input.js';
-import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type Decision, type InquiryCase, type InquiryLine,
-  DecisionSchema, InquiryDecisionSchema, validate, orderConformance, normalize, digest, fields } from './domain.js';
+import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type Decision, type InquiryCase, type InquiryLine, type NewCustomer,
+  DecisionSchema, InquiryDecisionSchema, validate, orderConformance, inquiryConformance, normalize, digest, fields } from './domain.js';
 
 const State = Annotation.Root({
   sources:Annotation<Source[]>(), extracted:Annotation<Extraction>(), draft:Annotation<Draft>(),
   customers:Annotation<Customer[]>(), items:Annotation<CatalogCandidate[]>(), addresses:Annotation<Address[]>(),
   availability:Annotation<InquiryLine[]>(),
   issues:Annotation<Issue[]>(), status:Annotation<string>(), revision:Annotation<string>(), conformance:Annotation<string>(),
-  decision:Annotation<unknown>(), inquiry:Annotation<InquiryCase>(), order:Annotation<string>(),
+  decision:Annotation<unknown>(), newCustomer:Annotation<NewCustomer|undefined>(), inquiry:Annotation<InquiryCase>(), order:Annotation<string>(), suggestion:Annotation<string>(),
   audit:Annotation<unknown[]>({reducer:(a,b)=>a.concat(b),default:()=>[]})
 });
 
 export type InquiryReplyDrafter=(inquiry:InquiryCase)=>Promise<{draft:string;language?:string;traceId?:string;model?:string}>;
+export type ProposalNotice={kind:'order-draft'|'reply-suggestion';reference:string;customer:string;summary:string};
+export type ProposalNotifier=(notice:ProposalNotice)=>Promise<void>;
 
+// Item codes are letters+digits ("A10") or letters-dash-digits ("AMBIG-24V"). Both forms must be
+// tokenised, otherwise a code like AMBIG-24V is found by the catalogue search but never uniquely
+// matched here and always falls through to "unresolved".
+const CODE_TOKEN=/\b[a-z]+-\d+[a-z]*\b|\b[a-z]+\d+\b/g;
 function matchingItems(items:Item[],text:string) {
   const exact=items.filter(i=>[i.name,i.item_name].some(v=>normalize(v)===normalize(text)));
   if(exact.length)return exact;
-  const modelTokens=[...normalize(text).matchAll(/\b[a-z]+\d+\b/g)].map(match=>match[0]);
+  const modelTokens=[...normalize(text).matchAll(CODE_TOKEN)].map(match=>match[0]);
   if(!modelTokens.length)return [];
   return items.filter(item=>{
-    const candidateTokens=[...normalize(`${item.name} ${item.item_name}`).matchAll(/\b[a-z]+\d+\b/g)].map(match=>match[0]);
+    const candidateTokens=[...normalize(`${item.name} ${item.item_name}`).matchAll(CODE_TOKEN)].map(match=>match[0]);
     return modelTokens.some(token=>candidateTokens.includes(token));
   });
 }
@@ -90,7 +96,13 @@ const templateReplyDrafter:InquiryReplyDrafter=async inquiry=>({
   draft:draftInquiryReply(inquiry.senderName,inquiry.lines,inquiry.replyLanguage,inquiry.requestedDate),language:inquiry.replyLanguage
 });
 
-export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor, draftReply:InquiryReplyDrafter=templateReplyDrafter) {
+export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateExtractor, draftReply:InquiryReplyDrafter=templateReplyDrafter, notify:ProposalNotifier=async()=>{}) {
+  // Best-effort: a proposal that already reached the ERP must stay filed even when the notice
+  // cannot be delivered, so this never throws and only records the failure in the audit.
+  async function noticeFailures(entry:ProposalNotice) {
+    try {await notify(entry);return [];}
+    catch(error) {return [{action:'notify-failed',actor:'assistant',reason:error instanceof Error?error.message:'unknown'}];}
+  }
   const inventoryReader=inventoryTool(erp);
   const catalogSearch=catalogSearchTool(erp);
   async function resolveAvailability(extracted:Extraction) {
@@ -142,17 +154,22 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const senderName=s.extracted.facts.sender[0]?.value??'';
       const customers=await erp.findCustomers(customerText);
       const customerMatches=customers.filter(c=>[c.name,c.customer_name].some(v=>normalize(v)===normalize(customerText)));
-      const needs:string[]=(s.extracted.warnings??[]).map(w=>`${w.field}: the model evidence is unreliable, so confirm it against the original email`);
-      if(customerMatches.length!==1) needs.push('Confirm the customer identity or pick an ERP customer; this does not block replying to a general inquiry');
-      const lines=s.availability;
-      if(lines.some(line=>line.status==='unresolved')) needs.push('Confirm the exact item code for anything that could not be matched uniquely');
-      if(lines.some(line=>line.status==='catalog-miss')) needs.push('The ERP catalog holds no candidate item, so a human must confirm whether it can be supplied; do not ask the customer to solve an internal catalog problem');
-      if(lines.some(line=>line.status==='untracked')) needs.push('The stock quantity is untracked and needs manual confirmation');
-      if(lines.some(line=>line.status==='lookup-failed')) needs.push('The inventory lookup failed and needs manual confirmation');
-      needs.push('Confirm the applicable price','Confirm whether the requested lead time can be met');
-      const condition=s.extracted.intent?.evidence.value??'';
       const kind=s.extracted.intent?.kind;
       const intent:InquiryCase['intent']=kind==='inquiry'||kind==='conditional'||kind==='unclear'?kind:'unclear';
+      const needs:string[]=[];
+      const lines=s.availability;
+      if(intent==='unclear') {
+        needs.push('This message is not a clear purchase or inquiry; confirm what it is before drafting any reply');
+      } else {
+        needs.push(...(s.extracted.warnings??[]).map(w=>`${w.field}: the model evidence is unreliable, so confirm it against the original email`));
+        if(customerMatches.length!==1) needs.push('Confirm the customer identity or pick an ERP customer; this does not block replying to a general inquiry');
+        if(lines.some(line=>line.status==='unresolved')) needs.push('Confirm the exact item code for anything that could not be matched uniquely');
+        if(lines.some(line=>line.status==='catalog-miss')) needs.push('The ERP catalog holds no candidate item, so a human must confirm whether it can be supplied; do not ask the customer to solve an internal catalog problem');
+        if(lines.some(line=>line.status==='untracked')) needs.push('The stock quantity is untracked and needs manual confirmation');
+        if(lines.some(line=>line.status==='lookup-failed')) needs.push('The inventory lookup failed and needs manual confirmation');
+        needs.push('Confirm the applicable price','Confirm whether the requested lead time can be met');
+      }
+      const condition=s.extracted.intent?.evidence.value??'';
       const sourceText=s.sources.find(source=>source.source==='email')?.text??s.sources[0]?.text??'';
       const language=replyLanguage(sourceText,s.extracted.reply?.language);
       const inquiry:InquiryCase={intent,customerText,senderName,
@@ -160,11 +177,29 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       return {inquiry,issues:[],status:'inquiry-prepared'};
     })
     .addNode('draftInquiryReply',async s=>{
+      // An unclear intent is not a business request the application should answer: it makes no
+      // model reply, so the human decides what the message is before any draft exists.
+      if(s.inquiry.intent==='unclear') {
+        return {revision:digest([s.sources,s.inquiry]),conformance:'the intent is not a determinate inquiry',status:'inquiry-review'};
+      }
       const reply=await draftReply(s.inquiry);
       if(!reply.draft.trim()) throw Error('MODEL_REPLY_EMPTY');
       const inquiry:InquiryCase={...s.inquiry,responseDraft:reply.draft.trim(),replyLanguage:reply.language??s.inquiry.replyLanguage,
         replyTraceId:reply.traceId,replyModel:reply.model};
-      return {inquiry,revision:digest([s.sources,inquiry]),status:'inquiry-review'};
+      return {inquiry,revision:digest([s.sources,inquiry]),
+        conformance:inquiryConformance(s.extracted,inquiry.responseDraft),status:'inquiry-review'};
+    })
+    .addNode('suggestInquiry',async s=>{
+      const {customer,senderName,customerText,intent,condition,requestedDate,responseDraft}=s.inquiry;
+      const summary=`Inquiry from ${senderName||'an unnamed sender'} (${customer||customerText||'not matched to an ERP customer'}) — ${intent}`
+        +`${condition?`\nThey asked: ${condition}`:''}${requestedDate?`\nRequested delivery: ${requestedDate}`:''}`;
+      const suggestion=await erp.suggestReply({summary,draft:responseDraft,mail:digest(s.sources),revision:s.revision,customer});
+      // Reached straight from draftInquiryReply this was an automatic proposal; reached from
+      // inquiryReview a human approved the text first. The audit records which one happened.
+      const auto=!s.conformance;
+      const audit:unknown[]=auto?[{action:'suggest-reply',actor:'assistant',revision:s.revision,reason:'deterministic conformance passed; a human still reviews and sends this reply'}]:[];
+      if(auto) audit.push(...await noticeFailures({kind:'reply-suggestion',reference:suggestion.name,customer,summary}));
+      return {suggestion:suggestion.name,status:'suggested',audit};
     })
     .addNode('inquiryReview',s=>{
       let feedback='';
@@ -172,8 +207,9 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
         const parsed=InquiryDecisionSchema.safeParse(interrupt({kind:'inquiry',revision:s.revision,inquiry:s.inquiry,status:s.status,feedback}));
         if(!parsed.success){feedback='INVALID_INQUIRY_DECISION';continue;}
         if(parsed.data.revision!==s.revision){feedback='STALE_APPROVAL';continue;}
+        if(parsed.data.action==='approve-reply' && !(parsed.data.responseDraft??'').trim()){feedback='REPLY_DRAFT_EMPTY: write the reply or close the ticket';continue;}
         const decision=parsed.data;
-        return {decision,inquiry:{...s.inquiry,responseDraft:decision.responseDraft},audit:[decision],
+        return {decision,inquiry:{...s.inquiry,responseDraft:decision.responseDraft??s.inquiry.responseDraft},audit:[decision],
           status:decision.action==='approve-reply'?'response-approved':decision.action==='close'?'closed':'inquiry-review',
           revision:digest([s.revision,decision])};
       }
@@ -198,13 +234,15 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
         })};
       issues.push(...await checkERP(draft));
       if(draft.customer && draft.po && (await erp.duplicates(draft)).length) issues.push({code:'DUPLICATE_PO',field:'po',message:'ERP already contains this customer PO; commit will reconcile only an identical integration draft'});
-      return {draft,customers,items,addresses,issues,conformance:orderConformance(s.extracted,issues),revision:digest([s.sources,draft]),status:'review'};
+      // The assistant proposes a customer for the human to confirm; the model never creates one.
+      const newCustomer:NewCustomer|undefined=customer?undefined:{name:value('customer'),address:value('address')||undefined};
+      return {draft,customers,items,addresses,issues,newCustomer,conformance:orderConformance(s.extracted,issues),revision:digest([s.sources,draft]),status:'review'};
     })
     .addNode('review',s=>{
       let decision:Decision;
       let feedback='';
       for (;;) {
-        const parsed=DecisionSchema.safeParse(interrupt({kind:'order',revision:s.revision,draft:s.draft,issues:s.issues,customers:s.customers,items:s.items,addresses:s.addresses,status:s.status,feedback}));
+        const parsed=DecisionSchema.safeParse(interrupt({kind:'order',revision:s.revision,draft:s.draft,issues:s.issues,customers:s.customers,items:s.items,addresses:s.addresses,newCustomer:s.newCustomer,status:s.status,feedback}));
         if(!parsed.success) {feedback='INVALID_DECISION: check the review JSON shape';continue;}
         if(parsed.data.revision!==s.revision) {feedback='STALE_APPROVAL: export the current review';continue;}
         if(parsed.data.action==='approve' && s.issues.length && !parsed.data.reason.trim()) {feedback='RESOLUTION_REASON_REQUIRED';continue;}
@@ -213,10 +251,18 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       return {decision,draft:decision.draft,audit:[decision],status:decision.action==='approve'?'approved':decision.action==='reject'?'rejected':'needs-info',revision:digest([s.revision,decision])};
     })
     .addNode('write',async s=>{
-      const issues=await checkERP(s.draft);
+      // A human can confirm a new customer in the review; it is created before the order so the
+      // draft's customer/address point at records that now exist. The model never creates one.
+      let draft=s.draft;
+      const newCustomer=(s.decision as {newCustomer?:NewCustomer}|undefined)?.newCustomer;
+      if(newCustomer) {
+        const created=await erp.createCustomer(newCustomer);
+        draft={...draft,customer:created.name,address:created.address??draft.address};
+      }
+      const issues=await checkERP(draft);
       if(issues.length) return {issues,status:'review',revision:digest([s.revision,issues])};
       let order;
-      try {order=await erp.createDraft(s.draft);}
+      try {order=await erp.createDraft(draft);}
       catch(error) {
         if(error instanceof Error && error.message.startsWith('DUPLICATE')) {
           const issues=[{code:'DUPLICATE_PO',field:'po',message:error.message}];
@@ -227,15 +273,19 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       if(order.docstatus!==0) throw Error('ERP_RETURNED_NON_DRAFT');
       // Reached straight from match() this was an automatic proposal; reached from review()
       // a human approved it first. The audit records which one happened.
-      return {order:order.name,status:'created',issues:[],
-        audit:s.conformance?[]:[{action:'auto-propose',actor:'assistant',revision:s.revision,reason:'deterministic validation passed; a human still reviews and submits this draft in the ERP'}]};
+      const auto=!s.conformance;
+      const audit:unknown[]=auto?[{action:'auto-propose',actor:'assistant',revision:s.revision,reason:'deterministic validation passed; a human still reviews and submits this draft in the ERP'}]:[];
+      if(auto) audit.push(...await noticeFailures({kind:'order-draft',reference:order.name,customer:draft.customer,
+        summary:`Sales Order draft ${order.name} for ${draft.customer||'an unmatched customer'} (PO ${draft.po||'none'})`}));
+      return {order:order.name,draft,status:'created',issues:[],audit};
     })
     .addEdge(START,'extract')
     .addEdge('extract','resolveInventory')
     .addConditionalEdges('resolveInventory',s=>s.extracted.intent?.kind==='purchase'||(!s.extracted.intent&&!s.extracted.warnings?.some(w=>w.field==='intent'))?'match':'prepareInquiry',['prepareInquiry','match'])
     .addEdge('prepareInquiry','draftInquiryReply')
-    .addEdge('draftInquiryReply','inquiryReview')
-    .addConditionalEdges('inquiryReview',s=>s.status==='inquiry-review'?'inquiryReview':END,['inquiryReview',END])
+    .addConditionalEdges('draftInquiryReply',s=>s.conformance?'inquiryReview':'suggestInquiry',['inquiryReview','suggestInquiry'])
+    .addConditionalEdges('inquiryReview',s=>s.status==='response-approved'?'suggestInquiry':s.status==='inquiry-review'?'inquiryReview':END,['suggestInquiry','inquiryReview',END])
+    .addEdge('suggestInquiry',END)
     .addConditionalEdges('match',s=>s.conformance?'review':'write',['review','write'])
     .addConditionalEdges('review',s=>s.status==='approved'?'write':s.status==='needs-info'?'review':END,['write','review',END])
     .addConditionalEdges('write',s=>s.status==='created'?END:'review',[END,'review'])

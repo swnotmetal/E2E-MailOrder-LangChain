@@ -1,5 +1,5 @@
 import { type Customer, type Item, type Address, type Draft, digest, orderKey, normalize } from './domain.js';
-export type ERP = Pick<FrappeERP, 'findCustomers'|'findItems'|'inventory'|'addresses'|'duplicates'|'createDraft'>;
+export type ERP = Pick<FrappeERP, 'findCustomers'|'findItems'|'inventory'|'addresses'|'duplicates'|'createDraft'|'suggestReply'|'createCustomer'>;
 export type Order = {name:string; custom_integration_key?:string; custom_review_digest?:string; docstatus:number; po_no?:string};
 export type Inventory = {itemCode:string; itemName:string; stockTracked:boolean; totalActualQty:number|null; warehouses:{warehouse:string;actualQty:number;projectedQty:number;reservedQty:number}[]};
 
@@ -50,10 +50,10 @@ export class FrappeERP {
       totalActualQty:warehouses.reduce((sum,row)=>sum+row.actualQty,0),warehouses};
   }
   async addresses(customer:string):Promise<Address[]> {
-    const rows = await this.list<{name:string;address_line1:string;address_line2:string;city:string;country:string;pincode:string}>('Address',
-      ['name','address_line1','address_line2','city','country','pincode'],
+    const rows = await this.list<{name:string;address_line1:string;address_line2:string;city:string;state:string;country:string;pincode:string}>('Address',
+      ['name','address_line1','address_line2','city','state','country','pincode'],
       [['Dynamic Link','link_doctype','=','Customer'],['Dynamic Link','link_name','=',customer],['disabled','=',0]]);
-    return rows.map(a=>({name:a.name,text:[a.address_line1,a.address_line2,a.city,a.pincode,a.country].filter(Boolean).join(', ')}));
+    return rows.map(a=>({name:a.name,text:[a.address_line1,a.address_line2,a.city,a.state,a.pincode,a.country].filter(Boolean).join(', ')}));
   }
   async duplicates(d:Draft) {
     const rows=await this.list<Order>('Sales Order',['name','docstatus','po_no','custom_integration_key','custom_review_digest'],[['customer','=',d.customer]]);
@@ -83,6 +83,44 @@ export class FrappeERP {
       const found=await reconcile(); if(found) return found;
       throw error;
     }
+  }
+  // A suggested reply is filed as a ToDo: the ERP's own "a human must act on this" object, so it
+  // shows up in the work queue next to the customer. It is NOT a Communication: that is email
+  // history, and filing an unsent draft there would imply correspondence that never happened.
+  async suggestReply(s:{summary:string;draft:string;mail:string;revision:string;customer?:string}):Promise<{name:string}> {
+    // The mail digest is the suggestion's identity, so re-ingesting the same message reconciles to
+    // the work item that already exists instead of filing a second one. The review revision is
+    // deliberately NOT used here: it also covers the model prose, which varies between runs.
+    const existing=await this.list<{name:string}>('ToDo',['name'],[['description','like',`%${s.mail}%`]]);
+    if(existing.length) return {name:existing[0].name};
+    return this.request<{name:string}>('/api/resource/ToDo', {
+      doctype:'ToDo',status:'Open',priority:'Medium',
+      description:[s.summary,'','Suggested reply (not sent):','',s.draft,'',`-- mail ${s.mail}`,`-- review revision ${s.revision}`].join('\n'),
+      ...(s.customer?{reference_type:'Customer',reference_name:s.customer}:{})
+    });
+  }
+  // A confirmed new customer is written once and then matched forever after. Like a Sales Order,
+  // this only happens after a human approves the proposal in the review — the model never creates
+  // customers on its own. The free-text address is stored as one line; the ERP links by name, so
+  // the order's address field points at this record's name rather than matching text.
+  async createCustomer(c:{name:string;address?:string}):Promise<{name:string;address?:string}> {
+    const existing=await this.findCustomers(c.name);
+    if(existing.length) return {name:existing[0].name};
+    const customer=await this.request<{name:string}>('/api/resource/Customer', {
+      doctype:'Customer',customer_name:c.name,customer_type:'Company',customer_group:'Demo Customers',
+      territory:'Demo Finland',default_currency:'EUR',default_price_list:'Nordic Demo EUR'
+    });
+    let address:string|undefined;
+    if(c.address) {
+      const created=await this.request<{name:string}>('/api/resource/Address', {
+        doctype:'Address',address_title:`${c.name} Ship`,address_type:'Shipping',address_line1:c.address,
+        // Address requires a city; the free-text address is not parsed, so it is reused here as a
+        // placeholder rather than left empty (which the ERP rejects as mandatory).
+        city:c.address,country:'',is_shipping_address:1,links:[{link_doctype:'Customer',link_name:customer.name}]
+      });
+      address=created.name;
+    }
+    return {name:customer.name,address};
   }
 }
 

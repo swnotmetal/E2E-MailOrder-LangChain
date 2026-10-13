@@ -1,5 +1,24 @@
 > 2026-09-22 当前约束：所有后续模型调用严格只用 Gemini 2.5 Flash-Lite（`gemini-2.5-flash-lite`），使用 GOOGLE_API_KEY / ORDER_EXTRACTOR=gemini。下文旧供应商记录仅为历史，不构成继续调用的授权。用户已于 2026-09-22 撤销两次 / $0.05 本地限制，保留历史账本；额度或限流错误停止，不自动重试或切换。下文预算限制仅为历史记录；已发生一次旧供应商 401 请求。
 
+## 2026-10-13 询价路径自动归档回复建议
+
+- 询价/条件式意图现在先过确定性闸门 `inquiryConformance`（意图明确、无抽取警告、草稿非空）。合规则**无人为打断**直接写入 ERP 工作项；不合规则进入 `inquiryReview`，人工批准后同样写入。`unclear` 意图永远停在人工打断。
+- ERP 归宿是 Frappe 原生 `ToDo`（"待人工处理"对象），**不是 `Communication`**：后者是邮件历史，把未发送的草稿写进去会暗示发生过通信，与本项目"不得声称已发信"的约束冲突。
+- 真实 ERP 证据：虚构询价经固定模型 + 真实 ERPNext，`/api/ingest` 返回 HTTP 200 / status `suggested` / pending `[]`；工作项 `fh4n80lu4f`（Open，链接 Customer `Acme Workshop`）描述内含建议回复全文、`-- mail <摘要>` 与 `-- review revision <digest>`。
+- 写入以**邮件内容摘要**为身份 reconcile（实测两次投放同一 `f8ahlbfm2p`，只产生一个工作项）。身份不用 review revision：后者覆盖模型生成的回复文本，逐次不同（实测同一封邮件的 revision 为 `a7b2443…` 与 `839569c…`），故不能用作幂等键。
+- 同时修复 `scripts/learn.ts`：指向外部真实 ERP 时 `mockWrites()` 曾因 `/__mock/status` 404 让**已经成功写入**的请求返回 400。该计数仅供参考，现降级为 `null`。`/api/reset` 对外部 ERP 仍然报错，这是刻意的——绝不能重置真实数据。
+- 因此**下文 2026-09-23 各条中的"Mock ERP 写入 0"只描述该次历史运行**，不再是当前询价路径的行为。当时那些运行本身没有写入，记录未被修改。
+- mock 回归 54/54 通过；`tsc --noEmit` 干净。
+
+## 2026-10-13 提案后的内部通知
+
+- 工作流新增可注入的 `ProposalNotifier`（`src/workflow.ts`），默认空实现。**只有自动路径通知**：人工批准时批注人本来就在场，通知没有意义。
+- 通知**尽力而为**：发送失败不抛错、不回滚已写入的 ERP 工件，只在 audit 记一条 `notify-failed`。停在人工打断的运行尚未产生提案，不通知任何人。
+- 通知只发给**内部**地址，模型本身没有任何发信能力。`scripts/learn.ts` 通过 `LEARN_NOTIFY_TO` 选择启用，走与收件箱相同的本地 SMTP。
+- 真实证据：Mailpit 真实收到 1 封 `review-lab@example.invalid → reviewers@example.invalid`，主题 `Reply suggestion filed: fh4n80lu4f`，正文含提案摘要与 `Filed in the ERP as fh4n80lu4f`。同一次运行归并到已存在的真实工作项而未新建，说明幂等修复在真实 ERP 上成立。
+- 表述随之修正：原先的「从不发信」收紧为「从不向客户发信；唯一的对外邮件是可选的内部通知」，README、learning-guide 与 UI 同步更改。
+- mock 回归 55/55 通过；`tsc --noEmit` 干净。
+
 ## 2026-09-24 共享库存节点与 LangSmith 排错练习
 
 - 工作流现在固定经过 `extract → resolveInventory` 再按意图分流。明确订单与询价都获得只读库存快照；只有唯一匹配的 ERP 商品才调用库存工具，`unresolved` 不猜编码。库存不足不自动拒单，也不构成预留或交付承诺。
