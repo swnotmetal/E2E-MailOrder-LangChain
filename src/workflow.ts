@@ -4,14 +4,14 @@ import { type ERP } from './erp.js';
 import { catalogSearchTool, inventoryTool, type CatalogCandidate } from './model.js';
 import { templateExtractor, verifyEvidence, type Extractor } from './input.js';
 import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type Decision, type InquiryCase, type InquiryLine, type NewCustomer,
-  DecisionSchema, InquiryDecisionSchema, validate, orderConformance, inquiryConformance, normalize, digest, fields } from './domain.js';
+  DecisionSchema, InquiryDecisionSchema, validate, orderConformance, inquiryConformance, normalize, normalizeDate, digest, fields } from './domain.js';
 
 const State = Annotation.Root({
   sources:Annotation<Source[]>(), extracted:Annotation<Extraction>(), draft:Annotation<Draft>(),
   customers:Annotation<Customer[]>(), items:Annotation<CatalogCandidate[]>(), addresses:Annotation<Address[]>(),
   availability:Annotation<InquiryLine[]>(),
   issues:Annotation<Issue[]>(), status:Annotation<string>(), revision:Annotation<string>(), conformance:Annotation<string>(),
-  decision:Annotation<unknown>(), newCustomer:Annotation<NewCustomer|undefined>(), inquiry:Annotation<InquiryCase>(), order:Annotation<string>(), suggestion:Annotation<string>(),
+  decision:Annotation<unknown>(), newCustomer:Annotation<NewCustomer|undefined>(), inquiry:Annotation<InquiryCase>(), order:Annotation<string>(), suggestion:Annotation<string>(), customerNote:Annotation<string>(),
   audit:Annotation<unknown[]>({reducer:(a,b)=>a.concat(b),default:()=>[]})
 });
 
@@ -33,6 +33,9 @@ function matchingItems(items:Item[],text:string) {
     return modelTokens.some(token=>candidateTokens.includes(token));
   });
 }
+// Addresses differ only by punctuation ("NSW 2000" vs "NSW, 2000"); compare on letters/digits so
+// the mail's free-text address matches the ERP's stored line without a human fixing commas.
+const loose=(s:string)=>normalize(s).replace(/[^\p{L}\p{N}\s]/gu,'');
 
 function replyLanguage(sourceText:string,modelLanguage?:string) {
   if(/\p{Script=Han}/u.test(sourceText)) return 'zh';
@@ -90,6 +93,18 @@ function draftInquiryReply(senderName:string,lines:InquiryLine[],language:string
   if(language==='de') return `Guten Tag${senderName?` ${senderName}`:''},\n\nvielen Dank für Ihre Anfrage. Wir prüfen derzeit Folgendes:\n\n${details}\n\nUnser zusammengefasstes Angebot enthält die Preise, bestätigt, ob ${requestedDate||'die gewünschte Lieferung'} möglich ist, und prüft die von Ihnen angegebene Lieferadresse. Bis zur Bestätigung ist keine Ware reserviert.\n\nMit freundlichen Grüßen\nVertriebsteam`;
   if(language==='et') return `Tere${senderName?` ${senderName}`:''},\n\ntäname päringu eest. Kontrollime praegu järgmist:\n\n${details}\n\nKoondpakkumises esitame hinnad, kinnitame, kas ${requestedDate||'soovitud tarne'} on võimalik, ja kontrollime teie esitatud tarneaadressi. Kuni kinnitamiseni ei ole kaup broneeritud.\n\nLugupidamisega\nMüügimeeskond`;
   return `Hello${senderName?` ${senderName}`:''},\n\nThank you for your inquiry. We are currently checking the following:\n\n${details}\n\nOur consolidated quotation will include pricing, confirm whether ${requestedDate||'the requested delivery'} is feasible, and check the delivery address you provided. No stock is reserved until we confirm it.\n\nBest regards,\nSales team`;
+}
+
+// An order that names an item the catalog cannot confirm gets a customer-facing note, symmetric with
+// the inquiry reply. It reuses the same per-line wording so the customer is never asked to solve an
+// internal catalog problem: a catalog-miss says the team is checking whether it can be supplied;
+// only an unresolved (ambiguous) item asks the customer for identifying details.
+function draftOrderNote(senderName:string,lines:InquiryLine[],language:string) {
+  const details=lines.map(line=>`- ${inventoryText(line,language)}`).join('\n');
+  if(language==='zh') return `您好${senderName?`，${senderName}`:''}：\n\n感谢您的订单。在继续处理之前，我们需要与您确认以下商品：\n\n${details}\n\n确认后我们会尽快跟进。\n\n此致\n销售团队`;
+  if(language==='de') return `Guten Tag${senderName?` ${senderName}`:''},\n\nvielen Dank für Ihre Bestellung. Bevor wir fortfahren, müssen wir die folgenden Positionen bestätigen:\n\n${details}\n\nWir melden uns, sobald diese bestätigt sind.\n\nMit freundlichen Grüßen\nVertriebsteam`;
+  if(language==='et') return `Tere${senderName?` ${senderName}`:''},\n\ntäname tellimuse eest. Enne jätkamist peame kinnitama järgmised tooted:\n\n${details}\n\nVõtame ühendust, kui need on kinnitatud.\n\nLugupidamisega\nMüügimeeskond`;
+  return `Hello${senderName?` ${senderName}`:''},\n\nThank you for your order. Before we can proceed we need to confirm the following item(s) with you:\n\n${details}\n\nWe will follow up as soon as these are confirmed.\n\nBest regards,\nSales team`;
 }
 
 const templateReplyDrafter:InquiryReplyDrafter=async inquiry=>({
@@ -222,33 +237,41 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const matches=customers.filter(c=>normalize(c.customer_name)===normalize(value('customer'))||normalize(c.name)===normalize(value('customer')));
       const customer=matches.length===1?matches[0].name:'';
       const addresses=customer?await erp.addresses(customer):[];
-      const addressMatches=addresses.filter(a=>normalize(a.text)===normalize(value('address')));
+      const addressMatches=addresses.filter(a=>loose(a.text)===loose(value('address')));
       const email=e.lines.filter(l=>l.description.evidence.source==='email');
       const pdf=e.lines.filter(l=>l.description.evidence.source==='pdf');
       const signature=(lines:typeof email)=>JSON.stringify(lines.map(l=>[normalize(l.description.value),l.quantity.value,normalize(l.unit.value)]));
       if(email.length && pdf.length && signature(email)!==signature(pdf)) issues.push({code:'LINE_CONFLICT',field:'lines',message:'Email/PDF line descriptions, quantities or units differ; reconcile explicitly'});
-      const draft:Draft={customer,po:value('po'),date:value('date'),address:addressMatches.length===1?addressMatches[0].name:'',
+      const draft:Draft={customer,po:value('po'),date:normalizeDate(value('date')),address:addressMatches.length===1?addressMatches[0].name:'',
         lines:(pdf.length?pdf:email).map(l=>{
           const exact=matchingItems(items,l.description.value);
-          return {description:l.description.value,item:exact.length===1?exact[0].name:'',quantity:l.quantity.value,unit:l.unit.value||(exact.length===1?exact[0].stock_uom:'')};
+          return {description:l.description.value,item:exact.length===1?exact[0].name:'',quantity:l.quantity.value,unit:exact.length===1?exact[0].stock_uom:l.unit.value};
         })};
       issues.push(...await checkERP(draft));
       if(draft.customer && draft.po && (await erp.duplicates(draft)).length) issues.push({code:'DUPLICATE_PO',field:'po',message:'ERP already contains this customer PO; commit will reconcile only an identical integration draft'});
       // The assistant proposes a customer for the human to confirm; the model never creates one.
       const newCustomer:NewCustomer|undefined=customer?undefined:{name:value('customer'),address:value('address')||undefined};
-      return {draft,customers,items,addresses,issues,newCustomer,conformance:orderConformance(s.extracted,issues),revision:digest([s.sources,draft]),status:'review'};
+      // An order that names an item the catalog cannot confirm gets a customer-facing note, symmetric
+      // with the inquiry reply: drafted here, editable in review, filed as a work item only after a
+      // human approves. The model never drafts or sends it on its own.
+      const sourceText=s.sources.find(source=>source.source==='email')?.text??s.sources[0]?.text??'';
+      const senderName=e.facts.sender[0]?.value??'';
+      const language=replyLanguage(sourceText,e.reply?.language);
+      const noteLines=s.availability.filter(line=>line.status==='catalog-miss'||line.status==='unresolved');
+      const customerNote=noteLines.length?draftOrderNote(senderName,noteLines,language):'';
+      return {draft,customers,items,addresses,issues,newCustomer,customerNote,conformance:orderConformance(s.extracted,issues),revision:digest([s.sources,draft]),status:'review'};
     })
     .addNode('review',s=>{
       let decision:Decision;
       let feedback='';
       for (;;) {
-        const parsed=DecisionSchema.safeParse(interrupt({kind:'order',revision:s.revision,draft:s.draft,issues:s.issues,customers:s.customers,items:s.items,addresses:s.addresses,newCustomer:s.newCustomer,status:s.status,feedback}));
+        const parsed=DecisionSchema.safeParse(interrupt({kind:'order',revision:s.revision,draft:s.draft,issues:s.issues,customers:s.customers,items:s.items,addresses:s.addresses,newCustomer:s.newCustomer,customerNote:s.customerNote,status:s.status,feedback}));
         if(!parsed.success) {feedback='INVALID_DECISION: check the review JSON shape';continue;}
         if(parsed.data.revision!==s.revision) {feedback='STALE_APPROVAL: export the current review';continue;}
         if(parsed.data.action==='approve' && s.issues.length && !parsed.data.reason.trim()) {feedback='RESOLUTION_REASON_REQUIRED';continue;}
         decision=parsed.data; break;
       }
-      return {decision,draft:decision.draft,audit:[decision],status:decision.action==='approve'?'approved':decision.action==='reject'?'rejected':'needs-info',revision:digest([s.revision,decision])};
+      return {decision,draft:decision.draft,customerNote:decision.customerNote??s.customerNote,audit:[decision],status:decision.action==='approve'?'approved':decision.action==='reject'?'rejected':'needs-info',revision:digest([s.revision,decision])};
     })
     .addNode('write',async s=>{
       // A human can confirm a new customer in the review; it is created before the order so the
@@ -258,6 +281,14 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       if(newCustomer) {
         const created=await erp.createCustomer(newCustomer);
         draft={...draft,customer:created.name,address:created.address??draft.address};
+      }
+      // A customer-facing note exists only when the order named an item the catalog cannot confirm.
+      // It is filed as an ERP work item (never sent) only after a human approves, and reconciles by
+      // digest so re-approving after a fix does not file a second copy.
+      const customerNote=(s.customerNote??'').trim();
+      if(customerNote) {
+        await erp.suggestReply({summary:`Order note for ${draft.customer||'an unmatched customer'} (PO ${draft.po||'none'}) — item(s) to confirm with the customer`,
+          draft:customerNote,mail:digest([s.sources,'order-note']),revision:s.revision,customer:draft.customer});
       }
       const issues=await checkERP(draft);
       if(issues.length) return {issues,status:'review',revision:digest([s.revision,issues])};

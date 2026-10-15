@@ -101,25 +101,42 @@ export class FrappeERP {
   }
   // A confirmed new customer is written once and then matched forever after. Like a Sales Order,
   // this only happens after a human approves the proposal in the review — the model never creates
-  // customers on its own. The free-text address is stored as one line; the ERP links by name, so
-  // the order's address field points at this record's name rather than matching text.
+  // customers on its own.
+  //
+  // ERPNext's Address mandates BOTH `city` and `country`, but this app carries a single free-text
+  // address line (it does not parse the mail into city/state/country). It therefore stores the
+  // whole line as the city and the operating company's own country as the country. That is an
+  // explicit, reviewable assumption, not a parsed address: an international customer must be
+  // corrected in the ERP afterwards. `country` must be a real Country link — an empty string is
+  // rejected with MandatoryError, so a non-empty value is required.
+  private async companyCountry():Promise<string> {
+    const rows=await this.list<{country:string}>('Company',['country'],[['name','=',this.company]]).catch(()=>[]);
+    return rows[0]?.country||'Finland';
+  }
+  private async createAddress(customerName:string,addressText:string):Promise<string> {
+    const created=await this.request<{name:string}>('/api/resource/Address', {
+      doctype:'Address',address_title:`${customerName} Ship`,address_type:'Shipping',address_line1:addressText,
+      city:addressText,country:await this.companyCountry(),is_shipping_address:1,
+      links:[{link_doctype:'Customer',link_name:customerName}]
+    });
+    return created.name;
+  }
   async createCustomer(c:{name:string;address?:string}):Promise<{name:string;address?:string}> {
     const existing=await this.findCustomers(c.name);
-    if(existing.length) return {name:existing[0].name};
+    if(existing.length) {
+      const name=existing[0].name;
+      const linked=await this.addresses(name);
+      // Self-heal: a previous attempt may have created the customer and then failed on the address,
+      // leaving the pair half-written. Re-confirming completes the missing address instead of
+      // dead-ending on a customer that can never receive one.
+      if(c.address && !linked.length) return {name,address:await this.createAddress(name,c.address)};
+      return {name,address:linked[0]?.name};
+    }
     const customer=await this.request<{name:string}>('/api/resource/Customer', {
       doctype:'Customer',customer_name:c.name,customer_type:'Company',customer_group:'Demo Customers',
       territory:'Demo Finland',default_currency:'EUR',default_price_list:'Nordic Demo EUR'
     });
-    let address:string|undefined;
-    if(c.address) {
-      const created=await this.request<{name:string}>('/api/resource/Address', {
-        doctype:'Address',address_title:`${c.name} Ship`,address_type:'Shipping',address_line1:c.address,
-        // Address requires a city; the free-text address is not parsed, so it is reused here as a
-        // placeholder rather than left empty (which the ERP rejects as mandatory).
-        city:c.address,country:'',is_shipping_address:1,links:[{link_doctype:'Customer',link_name:customer.name}]
-      });
-      address=created.name;
-    }
+    const address=c.address?await this.createAddress(customer.name,c.address):undefined;
     return {name:customer.name,address};
   }
 }

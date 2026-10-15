@@ -43,15 +43,15 @@ Microsoft Graph / Gmail API / IMAP webhook
 | LangGraph | Classify, extract, route, interrupt, and checkpoint | Resume from a persisted node without repeating confirmed side effects |
 | Read-only ERP tools | Look up customers, catalog, inventory, price, and lead time | Mark unavailable facts as unknown; do not invent an answer or switch models |
 | Human review | Edit drafts, explain conflicts, approve an exact revision | Reject stale approval and require review of the latest content |
-| ERP write worker | Revalidate, create a `docstatus=0` Draft or file a reply suggestion as a work item, enforce idempotency, reconcile | After an uncertain POST, reconcile by unique key before deciding whether to retry |
+| ERP write worker | Revalidate, create a `docstatus=0` Draft, file a reply suggestion as a work item, or create a confirmed customer, enforce idempotency, reconcile | After an uncertain POST, reconcile by unique key before deciding whether to retry |
 | Email outlet | Send an approved reply and retain the thread ID | Use a send idempotency key; a send failure does not roll back an ERP result |
 
 ## Mapping to this repository
 
 - `src/model.ts`: the fixed Gemini 2.5 Flash-Lite understanding boundary; it has no ERP write permission.
 - `src/workflow.ts`: LangGraph routing, interrupts, revision semantics, and checkpoints.
-- `src/erp.ts`: ERPNext REST adapter; types separate inventory reads from the two writes — a `docstatus=0` Sales Order draft, and a reply suggestion filed as a `ToDo` work item.
-- `src/learn.html` and `scripts/learn.ts`: a single-machine learning UI, not an enterprise connector or production review console.
+- `src/erp.ts`: ERPNext REST adapter; it separates inventory reads from the three writes — a `docstatus=0` Sales Order draft, a reply suggestion filed as a `ToDo` work item, and a new `Customer` with one linked `Address` (only after a human confirms the proposal). ERPNext's `Address` mandates both `city` and `country`, so the single free-text line is stored as the city and the operating company's own country as the country; an international new customer must be corrected in the ERP afterwards.
+- `src/learn.html` and `scripts/learn.ts`: a single-machine learning UI, demoted to a read-only observation console and exception queue — not an enterprise connector, a production review console, or an ERP control surface.
 - `test/mock-erp.ts`: a development test double; its results are mock evidence only.
 
 The missing enterprise components are a provider-specific email connector, an independent queue, SSO/RBAC, long-running workers, an outbound mail service, and a production database checkpointer. They should be added one at a time.

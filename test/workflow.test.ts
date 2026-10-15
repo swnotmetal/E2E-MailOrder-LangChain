@@ -8,7 +8,7 @@ import { Command } from '@langchain/langgraph';
 import { joinPdfItems, readSources, templateExtractor, verifyEvidence } from '../src/input.js';
 import { workflow } from '../src/workflow.js';
 import { FrappeERP } from '../src/erp.js';
-import { validate, type Decision, type InquiryDecision } from '../src/domain.js';
+import { validate, normalizeDate, type Decision, type InquiryDecision } from '../src/domain.js';
 import { mockERP } from './mock-erp.js';
 
 async function setup() {
@@ -53,6 +53,26 @@ test('a conforming purchase is proposed to the ERP without a human interrupt',as
     assert.equal(s.values.audit.length,1);
     assert.equal(s.values.audit[0].action,'auto-propose');
     assert.equal(s.values.audit[0].actor,'assistant');
+  }finally{await x.close();}
+});
+test('natural-language dates are normalised to YYYY-MM-DD; relative dates stay for a human',()=>{
+  assert.equal(normalizeDate('March 8, 2027'),'2027-03-08');
+  assert.equal(normalizeDate('2027-03-05'),'2027-03-05');
+  assert.equal(normalizeDate('next Friday'),'next Friday');
+});
+test('a natural-language order normalises its date and unit to pass validation',async()=>{
+  const x=await setup();try{
+    const text='Customer: Acme Workshop\nPO: DEMO-888\nDelivery: March 8, 2027\nAddress: 10 Test Road, Helsinki, 00100, Finland\nItem: FILTER-A10 | 12 | units';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[fact('Acme Workshop')],sender:[],location:[],po:[fact('DEMO-888')],date:[fact('March 8, 2027')],address:[fact('10 Test Road, Helsinki, 00100, Finland')]},
+      intent:{kind:'purchase' as const,evidence:fact('Item:')},
+      lines:[{description:fact('FILTER-A10'),quantity:fact('12'),unit:fact('units')}]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('normalize'));
+    const s=await graph.getState(config('normalize'));
+    assert.equal(s.values.draft.date,'2027-03-08');
+    assert.equal(s.values.draft.lines[0].unit,'Nos');
+    assert.equal(s.values.status,'created');
+    assert.equal(x.mock.posts,1);
   }finally{await x.close();}
 });
 test('a purchase with any unresolved issue still stops behind the human interrupt',async()=>{
@@ -113,6 +133,28 @@ test('a human-confirmed new customer is created before the order is written',asy
     assert.equal(x.mock.createdCustomers.length,1);
     assert.equal(x.mock.createdCustomers[0].name,'Kiviniemi Oy');
     assert.equal(done.values.draft.customer,'Kiviniemi Oy');
+  }finally{await x.close();}
+});
+test('an order that names a catalog-miss item drafts a customer note and files it on approval',async()=>{
+  const x=await setup();try{
+    const text='Customer: Acme Workshop\nPO: DEMO-900\nDelivery: 2027-03-01\nAddress: 10 Test Road, Helsinki, 00100, Finland\nItem: Flux Capacitor X99 | 3 | Nos';
+    const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
+    const graph=workflow(x.erp,x.saver,async()=>({facts:{customer:[fact('Acme Workshop')],sender:[],location:[],po:[fact('DEMO-900')],date:[fact('2027-03-01')],address:[fact('10 Test Road, Helsinki, 00100, Finland')]},
+      intent:{kind:'purchase' as const,evidence:fact('Item:')},
+      lines:[{description:fact('Flux Capacitor X99'),quantity:fact('3'),unit:fact('Nos')}]}));
+    await graph.invoke({sources:[{source:'email',page:0,text}]},config('catalog-note'));
+    const s=await graph.getState(config('catalog-note'));
+    assert.equal(s.values.status,'review');
+    assert.match(s.values.customerNote,/Flux Capacitor X99/);
+    assert.match(s.values.customerNote,/checking whether this product can be supplied/);
+    assert.equal(x.mock.suggestions,0);
+    const decision={action:'approve',revision:s.values.revision,actor:'test-operator',reason:'Confirm the item with the customer',draft:s.values.draft,customerNote:s.values.customerNote};
+    await graph.invoke(new Command({resume:decision}),config('catalog-note'));
+    const done=await graph.getState(config('catalog-note'));
+    assert.equal(x.mock.suggestions,1);
+    assert.equal(done.values.status,'review'); // the unresolved item still blocks the order write
+    assert.match(x.mock.todos[0].description,/Flux Capacitor X99/);
+    assert.match(x.mock.todos[0].description,/Suggested reply \(not sent\)/);
   }finally{await x.close();}
 });
 test('a conforming inquiry is filed as an ERP work item without a human interrupt',async()=>{

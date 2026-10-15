@@ -35,7 +35,7 @@
     "@types/mailparser": "^3.9.0",
     "@types/node": "^26.6.2",
     "@types/nodemailer": "^8.0.2",
-    "koma-miko": "^0.1.0-alpha.12",
+    "koma-miko": "^0.1.0-alpha.14",
     "nodemailer": "^10.1.0",
     "pdf-lib": "^1.17.1",
     "tsx": "^4.23.15",

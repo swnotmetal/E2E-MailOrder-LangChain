@@ -1,5 +1,23 @@
 > 2026-09-22 当前约束：所有后续模型调用严格只用 Gemini 2.5 Flash-Lite（`gemini-2.5-flash-lite`），使用 GOOGLE_API_KEY / ORDER_EXTRACTOR=gemini。下文旧供应商记录仅为历史，不构成继续调用的授权。用户已于 2026-09-22 撤销两次 / $0.05 本地限制，保留历史账本；额度或限流错误停止，不自动重试或切换。下文预算限制仅为历史记录；已发生一次旧供应商 401 请求。
 
+## 2026-10-15 订单路径 catalog-miss 客户可见说明 + Lab 降级为观察台
+
+- **订单路径 catalog-miss 客户可见说明**：与询价路径对称。当订单里的商品无法唯一匹配目录（`catalog-miss` 或 `unresolved`）时，`match` 用同一套逐行措辞（复用 `inventoryText`）确定性草拟一条给客户的说明，随审核展示、可编辑，人工批准后才作为 ERP 工作项（`ToDo`，复用 `suggestReply`，按 digest 幂等）归档；模型从不代拟或代发。新增 `DecisionSchema.customerNote` 与 `State.customerNote`，并新增测试。
+- **Lab 降级为观察台**：`src/learn.html` 由“审核/执行”改名为“观察”；合规邮件自动归档后不再显示批准按钮，仅异常队列（未匹配商品、来源冲突、未知客户）保留人工审核控件。回滚/覆盖不在 Lab：订单是永不提交的 `docstatus=0` 草稿，更正只能在 ERP 内做（API 用户 `DELETE` 被拒 403，模型无 ERP 写权限）。
+- **回滚 vs LangSmith 结论**：LangSmith 只覆盖“轨迹”半边（输入、工具调用、用量、错误、人工反馈，即“发生了什么/为什么”），不能改 ERP 状态；Lab 覆盖“本地检查”半边（免 API key 的人类可读状态、证据、issue、审计、只读 ERP 快照）。两者都不是 ERP 控制面，控制权留在 ERP。
+- 表述同步：README 新增“Observability, control, and rollback”一节；learning-guide、enterprise-integration 同步 Lab 定位。
+- 回归：`tsc --noEmit` 干净，mock 回归 58/58 通过。本轮模型调用 0 次，成本 0。
+
+## 2026-10-15 新客户写入端到端实测（真实 ERPNext）
+
+- **新客户创建实测通过**：真实 ERPNext（WSL Ubuntu Docker Engine，v16.35.0）+ 虚构客户，走 `FrappeERP.createCustomer` 真实代码路径。`Customer` create → 200；`Address` create → 200；`addresses(customer)` 读回该地址（`<name> Ship-Shipping`，country `Finland`）。同一名称再次调用返回既有客户与其地址、不新建记录（幂等）。本轮模型调用 0 次，成本 0。
+- **根因与修复**：ERPNext 的 `Address` 同时强制 `city` 与 `country`；此前 `country:''` 被 `MandatoryError: [Address, …]: country`（HTTP 417）拒绝。现在 `country` 取**运营公司自身的国家**（先读 `Company.country`，读不到才回退 `Finland`），自由文本地址整行同时写入 `city`。这是显式、可复核的假设：本应用只携带一行自由文本地址，不解析城市/省份/国家，国际客户创建后需在 ERP 手工订正。
+- **半写自愈**：`createCustomer` 先建 `Customer` 再建 `Address`。若地址失败，客户会半写（无地址），旧逻辑因“已存在即返回”永远补不上。现已在“已存在”分支补建缺失地址：重新确认即可完成，避免死路。
+- **清理**：API 用户对 `Customer`/`Address` 的 `DELETE` 均为 403（预期）。已用 `bench --site frontend console`（Administrator）删除遗留的 `__perm-probe__` 与本轮 3 个 `Probe Co …` 测试客户及其地址；现仅剩 4 个种子客户与 4 个种子地址。
+- **工作区回归修复**：本轮开始时 `src/domain.ts` 存在一处未提交回滚（删除 `NewCustomer`/`newCustomer`、把 `responseDraft` 重新设为必填），令 `tsc` 失败（`TS2724`）。已将该未知改动存入 stash 保留、恢复到已提交版本，并移除误提交的 `// miko-enforcement-probe` 行。
+- 表述同步：README、`docs/learning-guide.md`、`docs/enterprise-integration.md` 原先声称“恰好两处写入”，现更正为三处（订单草稿、询价 ToDo、经人工确认的新客户）。
+- 回归：`tsc --noEmit` 干净，mock 回归 57/57 通过。以上是一次真实集成证据，不代表并发、多客户或跨语言场景；地址假设的局限已如实记录。
+
 ## 2026-10-13 询价路径自动归档回复建议
 
 - 询价/条件式意图现在先过确定性闸门 `inquiryConformance`（意图明确、无抽取警告、草稿非空）。合规则**无人为打断**直接写入 ERP 工作项；不合规则进入 `inquiryReview`，人工批准后同样写入。`unclear` 意图永远停在人工打断。

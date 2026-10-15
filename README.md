@@ -134,7 +134,18 @@ $env:ERP_ENV_FILE='.env.erp'
 npm run cli -- import fixtures/01-clean.eml fixtures/01-clean.pdf
 ```
 
-The workflow writes exactly two things, and neither is irreversible: a `docstatus=0` Sales Order draft for purchase mail, and a reply suggestion filed as an ERP work item for inquiry mail. Both are written automatically when the message passes deterministic conformance, and after human approval otherwise. It never gives the model ERP write credentials, never submits an order, and never sends mail to the customer. The only outbound mail is an opt-in internal notice that a proposal was filed — set `LEARN_NOTIFY_TO` and it goes over the same localhost SMTP the inbox uses, and a failed notice is recorded in the audit without undoing the ERP write. Inventory tools are read-only, linked shipping addresses must already exist, and both writes reconcile against an existing record before retrying.
+The workflow writes exactly three things, and none is irreversible: a `docstatus=0` Sales Order draft for purchase mail, a reply suggestion filed as an ERP work item for inquiry mail, and — only when a human confirms a brand-new customer in the review — that `Customer` plus one linked shipping `Address`. The first two are written automatically when the message passes deterministic conformance, and after human approval otherwise; the third always requires that explicit confirmation. It never gives the model ERP write credentials, never submits an order, and never sends mail to the customer. The only outbound mail is an opt-in internal notice that a proposal was filed — set `LEARN_NOTIFY_TO` and it goes over the same localhost SMTP the inbox uses, and a failed notice is recorded in the audit without undoing the ERP write. Inventory tools are read-only, an order's shipping address must already exist unless the customer was confirmed in the same review, and every write reconciles against an existing record before retrying.
+
+## Observability, control, and rollback
+
+The learning lab (`npm run learn`) is a **read-only observation console**, not an approval surface. In a real deployment sales people work in the ERP UI, not this page: mail that passes deterministic conformance is filed in the ERP automatically, and the lab only surfaces the **exception queue** — unmatched items, conflicting sources, unknown customers — that genuinely needs a human decision.
+
+There is deliberately no "rollback" or "overwrite" control in the lab, because there is nothing destructive to undo: the only order write is a `docstatus=0` Draft (never submitted) and the only reply write is a `ToDo` work item (never sent). If the ERP has a problem, the operator corrects it **in the ERP** (cancel or amend the draft) — the API user is forbidden `DELETE`, and the model has no ERP write credentials.
+
+- **LangSmith** covers the *trace* half: inputs, tool calls, usage, errors, and human-review feedback — "what happened and why". It cannot mutate ERP state.
+- **The lab** covers the *local inspection* half: no API key required; human-readable state, evidence, issues, audit trail, and the read-only ERP snapshot.
+
+Neither is a control surface for the ERP; that authority stays in the ERP itself.
 
 ## Architecture boundaries
 

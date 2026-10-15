@@ -74,7 +74,7 @@ export async function startLearningLab(port=3210) {
       if(useModel) {try{process.loadEnvFile('.env');}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}configureTracing();}
       for await(const event of await (useModel?modelGraph:graph).stream({sources},{configurable:{thread_id:id},streamMode:'updates',
         runName:`mailbox · ${subject}`,tags:['fictional-email','learning-lab','smtp-mailpit','source:mailpit'],metadata:{thread_id:id,subject,sourceSystem:'mailpit'}})) events.push(event);
-    } catch(error) {mailbox.get(id)!.error=error instanceof Error?error.message:'Unknown error';}
+    } catch(error) {console.error(error);mailbox.get(id)!.error=error instanceof Error?error.message:'Unknown error';}
     return id;
   }
   // A real deployment watches its mailbox; so does this one. Set LEARN_MAILPIT=off to disable.
@@ -173,7 +173,7 @@ export async function startLearningLab(port=3210) {
             if(mail.mode==='gemini') {try{process.loadEnvFile('.env');}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}configureTracing();}
             for await(const event of await (mail.mode==='gemini'?modelGraph:graph).stream({sources},{configurable:{thread_id:id},streamMode:'updates',
               runName:`mailbox · ${mail.subject}`,tags:['fictional-email','learning-lab','source:web-ui'],metadata:{thread_id:id,subject:mail.subject,sourceSystem:'web-ui'}})) events.push(event);
-          } catch(error) {mailbox.get(id)!.error=error instanceof Error?error.message:'Unknown error';}
+          } catch(error) {console.error(error);mailbox.get(id)!.error=error instanceof Error?error.message:'Unknown error';}
         } else if(req.url==='/api/ingest') {
           const mail=z.object({subject:z.string().trim().min(1).max(200),raw:z.string().min(1),mode:z.enum(['template','gemini']).default('template')}).parse(input);
           id=await ingestRaw(mail.subject,Buffer.from(mail.raw,'base64'),mail.mode==='gemini');

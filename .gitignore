@@ -28,3 +28,6 @@ experiments/kev-finnish-poc/finsen-v1-1-src/
 experiments/kev-finnish-poc/finsen-v1-1-src.zip
 experiments/kev-finnish-poc/__MACOSX/
 infra/.mailpit/
+
+# Local-only handover notes (machine env, ports, credentials refs) — never pushed
+docs/handover-*.md

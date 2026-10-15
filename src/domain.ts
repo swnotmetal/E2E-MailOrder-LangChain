@@ -33,7 +33,8 @@ export type Draft = z.infer<typeof DraftSchema>;
 export const DecisionSchema = z.object({
   action: z.enum(['approve', 'reject', 'request-info']), revision: z.string(),
   actor: z.string().trim().min(1), reason: z.string(), draft: DraftSchema, confirmPurchase:z.boolean().optional(),
-  newCustomer: z.object({ name: z.string().trim().min(1), address: z.string().trim().optional() }).optional()
+  newCustomer: z.object({ name: z.string().trim().min(1), address: z.string().trim().optional() }).optional(),
+  customerNote: z.string().trim().optional()
 }).strict();
 export type Decision = z.infer<typeof DecisionSchema>;
 export const InquiryDecisionSchema=z.object({
@@ -46,6 +47,22 @@ export const normalize = (s: string) => s.normalize('NFKC').trim().replace(/\s+/
 export const orderKey = (d: Draft) => digest([d.customer, normalize(d.po)]);
 export function validDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString().slice(0,10) === s;
+}
+// An absolute date the model copied verbatim ("March 5, 2027") is normalised to the ERP's YYYY-MM-DD
+// form; a relative or unparseable date ("next Friday", "下周五") is left as-is so a human confirms
+// it instead of the app inventing a day.
+export function normalizeDate(s: string): string {
+  const t = s.trim();
+  if (!t || validDate(t)) return t;
+  const parsed = Date.parse(t);
+  if (!Number.isNaN(parsed)) {
+    // Format with LOCAL date components, not toISOString(), so a date like "March 8, 2027" does
+    // not shift a day under a non-UTC timezone.
+    const d = new Date(parsed);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (validDate(iso)) return iso;
+  }
+  return t;
 }
 export function validate(d: Draft): Issue[] {
   const issues: Issue[] = [];
@@ -76,4 +93,3 @@ export function inquiryConformance(extracted: Extraction, replyDraft: string): s
   if (!replyDraft.trim()) return 'the reply draft is empty';
   return '';
 }
-// miko-enforcement-probe
