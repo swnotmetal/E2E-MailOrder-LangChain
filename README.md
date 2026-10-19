@@ -147,6 +147,21 @@ There is deliberately no "rollback" or "overwrite" control in the lab, because t
 
 Neither is a control surface for the ERP; that authority stays in the ERP itself.
 
+## Failure Lab
+
+`npm run failure-lab` runs the reliability scenarios end to end against the in-process mock ERP — no Docker, no real ERPNext, no model calls — and prints a pass/fail line with the evidence for each:
+
+- **duplicate delivery** — the same PO twice creates one ERP order;
+- **duplicate with changed content** — a re-delivered PO with different content is refused (`DUPLICATE_CHANGED_OR_NOT_DRAFT`), never overwritten;
+- **ERP write times out after commit** — two concurrent calls reconcile to the same order by integration key, one write;
+- **stale approval** — an approval for an old revision cannot write (`STALE_APPROVAL`);
+- **crash and restart** — a persisted checkpoint resumes the interrupted review;
+- **ERP unavailable** — a failed read leaves a retryable checkpoint instead of losing the message;
+- **ambiguous item stays blocked** — approve never bypasses deterministic validation;
+- **reject never writes** — request-info/reject create no ERP order.
+
+The scenarios are the same ones asserted in `test/workflow.test.ts`; the lab makes them watchable in one command. Real-ERPNext acceptance for the Sales Order draft, replay and changed-content refusal is recorded in [docs/verification.md](docs/verification.md).
+
 ## Architecture boundaries
 
 - `src/input.ts` parses email/PDF text and retains exact source evidence.

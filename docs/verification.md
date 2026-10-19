@@ -1,5 +1,12 @@
 > 2026-09-22 当前约束：所有后续模型调用严格只用 Gemini 2.5 Flash-Lite（`gemini-2.5-flash-lite`），使用 GOOGLE_API_KEY / ORDER_EXTRACTOR=gemini。下文旧供应商记录仅为历史，不构成继续调用的授权。用户已于 2026-09-22 撤销两次 / $0.05 本地限制，保留历史账本；额度或限流错误停止，不自动重试或切换。下文预算限制仅为历史记录；已发生一次旧供应商 401 请求。
 
+## 2026-10-20 Failure Lab 与真实 ERPNext Sales Order 验收
+
+- **Failure Lab 可运行**：新增 `npm run failure-lab`（`scripts/failure-lab.ts`），把此前散落在 `test/workflow.test.ts` 的故障场景收拢成一条可运行、可观看的演示，8/8 通过：重复投递→1 张订单；内容变更重投→`DUPLICATE_CHANGED_OR_NOT_DRAFT` 拒绝；写入超时→按 `custom_integration_key` 协调、并发两次返回同一张订单且仅 1 次写入；旧 revision 批准→`STALE_APPROVAL`、0 写入；连接断开后从 checkpoint 重启→恢复中断审核并写入；ERP 读失败→可重试 checkpoint；歧义商品人工 approve→仍被校验挡住、0 写入；request-info/reject→0 写入。
+- **真实 ERPNext Sales Order 验收通过**（`data/real-order-acceptance.ts`，虚构订单）：`createDraft` 在真实 ERPNext 生成 `SAL-ORD-2026-00003`，`docstatus=0`，客户 `OZ Hardware Logistics`、地址 `OZ Hardware Logistics Ship-Shipping`、商品 `AMBIG-24V`（`Nos`，5 件，EUR 30），并写入 `custom_integration_key` 与 `custom_review_digest`。相同 draft 重放→同一张订单、未新建（1→1）；同 PO 内容变更→`DUPLICATE_CHANGED_OR_NOT_DRAFT` 拒绝、仍 1 张。验收后用 `bench console`（Administrator）删除该测试订单，ERP 回到种子状态。
+- **未覆盖 / 已知限制**：真实 ERP 的「写入成功但响应超时」无法可靠注入，仍由 mock（`timeoutAfterCommit`）证明；本轮未做多副本/共享 checkpointer。
+- 回归：`tsc --noEmit` 干净，`npm test` 60/60，`npm run failure-lab` 8/8。
+
 ## 2026-10-15 订单路径 catalog-miss 客户可见说明 + Lab 降级为观察台
 
 - **订单路径 catalog-miss 客户可见说明**：与询价路径对称。当订单里的商品无法唯一匹配目录（`catalog-miss` 或 `unresolved`）时，`match` 用同一套逐行措辞（复用 `inventoryText`）确定性草拟一条给客户的说明，随审核展示、可编辑，人工批准后才作为 ERP 工作项（`ToDo`，复用 `suggestReply`，按 digest 幂等）归档；模型从不代拟或代发。新增 `DecisionSchema.customerNote` 与 `State.customerNote`，并新增测试。

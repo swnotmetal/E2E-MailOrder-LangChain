@@ -14,6 +14,7 @@
     "mail:ingest": "tsx scripts/mail-ingest.ts",
     "check": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
+    "failure-lab": "tsx scripts/failure-lab.ts",
     "cli": "tsx src/cli.ts",
     "fixtures": "tsx scripts/fixtures.ts",
     "demo": "tsx scripts/demo.ts",
