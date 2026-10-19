@@ -41,10 +41,13 @@ export async function startLearningLab(port=3210) {
         text:`${notice.summary}\n\nFiled in the ERP as ${notice.reference}. A human still has to review and act on it there.`});
     } finally {transport.close();}
   }:async()=>{};
-  const resetMock=async()=>{
-    if(ownedMock) {ownedMock.reset();return;}
-    const response=await fetch(`${erpBase}/__mock/reset`,{method:'POST'});
-    if(!response.ok) throw Error(`MOCK_RESET_HTTP_${response.status}`);
+  // Clearing must never touch a real ERP: the API user cannot delete, and resetting real data
+  // would be destructive. With an external ERP this only clears the in-memory lab state, and a
+  // missing /__mock/reset endpoint means "nothing remote to clear", never a failure.
+  const resetMock=async():Promise<{clearedRemote:boolean}>=>{
+    if(ownedMock) {ownedMock.reset();return {clearedRemote:true};}
+    const response=await fetch(`${erpBase}/__mock/reset`,{method:'POST'}).catch(()=>null);
+    return {clearedRemote:Boolean(response?.ok)};
   };
   const mockWrites=async()=>{
     if(ownedMock) return ownedMock.posts;
@@ -160,8 +163,9 @@ export async function startLearningLab(port=3210) {
           res.end(JSON.stringify({pulled}));return;
         }
         if(req.url==='/api/reset') {
-          await resetMock();threads.clear();mailbox.clear();
-          res.end(JSON.stringify({reset:true,mockWrites:0,message:'Practice data cleared'}));return;
+          const {clearedRemote}=await resetMock();threads.clear();mailbox.clear();
+          res.end(JSON.stringify({reset:true,clearedRemote,
+            message:clearedRemote?'Practice data cleared':'Lab state cleared; the connected ERP was not modified'}));return;
         }
         let id:string, humanDecision:Decision|InquiryDecision|undefined;
         let feedback:undefined|{id?:string;error?:string};

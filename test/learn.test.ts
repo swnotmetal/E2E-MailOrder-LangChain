@@ -35,7 +35,7 @@ test('learning UI API validates tools, pauses graph, resumes human review and bl
     assert.equal(restarted.mockWrites,0);
     assert.ok(!restarted.values.issues.some((issue:any)=>issue.code==='DUPLICATE_PO'));
     assert.equal((await post('state',{id:started.id})).status,400);
-    const reset=await post('reset',{});assert.equal(reset.data.mockWrites,0);
+    const reset=await post('reset',{});assert.equal(reset.data.clearedRemote,true);assert.match(reset.data.message,/cleared/i);
     assert.equal((await post('state',{id:restarted.id})).status,400);
     const template=(await post('template',{fixture:'01-clean'})).data;
     const mail={subject:'Fictional inbox order',email:template.sources[0].text,attachment:template.sources.slice(1).map((s:any)=>s.text).join('\n')};

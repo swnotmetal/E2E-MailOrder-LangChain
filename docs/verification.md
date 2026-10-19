@@ -6,6 +6,7 @@
 - **真实 ERPNext Sales Order 验收通过**（`data/real-order-acceptance.ts`，虚构订单）：`createDraft` 在真实 ERPNext 生成 `SAL-ORD-2026-00003`，`docstatus=0`，客户 `OZ Hardware Logistics`、地址 `OZ Hardware Logistics Ship-Shipping`、商品 `AMBIG-24V`（`Nos`，5 件，EUR 30），并写入 `custom_integration_key` 与 `custom_review_digest`。相同 draft 重放→同一张订单、未新建（1→1）；同 PO 内容变更→`DUPLICATE_CHANGED_OR_NOT_DRAFT` 拒绝、仍 1 张。验收后用 `bench console`（Administrator）删除该测试订单，ERP 回到种子状态。
 - **未覆盖 / 已知限制**：真实 ERP 的「写入成功但响应超时」无法可靠注入，仍由 mock（`timeoutAfterCommit`）证明；本轮未做多副本/共享 checkpointer。
 - 回归：`tsc --noEmit` 干净，`npm test` 60/60，`npm run failure-lab` 8/8。
+- **Lab 与真实 ERP 完全兼容**：`/api/reset` 与 fixture 入口不再调用 mock 专属的 `/__mock/reset`；对真实 ERP 只清本地状态、返回「Lab state cleared; the connected ERP was not modified」，绝不删改真实数据。实测（真实 ERP）：`/api/reset` → 200、`/api/inbox` → 200、`/api/tool` → 200。新增 `docs/run-erp.md`（自己怎么跑 ERP + 把 Lab 接上去），README 顶部与「Real ERPNext adapter」都已链接。
 
 ## 2026-10-15 订单路径 catalog-miss 客户可见说明 + Lab 降级为观察台
 

@@ -10,6 +10,8 @@ An open-source, consulting-oriented IT engineering portfolio: a bounded B2B emai
 
 All examples and fixture records are fictional. The project deliberately has no vector database or multi-agent workflow. Every live model path uses only `gemini-2.5-flash-lite` through the shared entry point in `src/model.ts`; deterministic tests make no model calls.
 
+**Run it:** `npm run failure-lab` (reliability scenarios, no Docker) · `npm run learn` (lab with the in-process mock ERP) · **[docs/run-erp.md](docs/run-erp.md)** (start the local ERPNext and point the lab at it).
+
 ## What this project is
 
 This project uses a fictional order-review process to demonstrate consulting-relevant engineering judgment: defining scope, preserving evidence, constraining model and tool authority, and making review and recovery observable. It is not a production spam filter, a general inbox security product, or a fully autonomous order agent.
@@ -126,7 +128,9 @@ Raw inputs, audit state, and checkpoints live under ignored `data/`. Deleting th
 
 ## Real ERPNext adapter
 
-The isolated local ERPNext setup is documented in [infra/README.md](infra/README.md). When it is running:
+**Run the ERP and connect the lab: [docs/run-erp.md](docs/run-erp.md)** — one page, copy-paste (start the WSL stack, credentials, point the lab at it, what to look for in the ERP).
+
+The low-level container topology is documented in [infra/README.md](infra/README.md). When it is running:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File infra/start-wsl.ps1
