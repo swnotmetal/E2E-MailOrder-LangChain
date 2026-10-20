@@ -1,4 +1,4 @@
-# B2B Email Order Review
+# Langorder-ai
 
 A bounded B2B email-to-ERP workflow in TypeScript: turn a customer email into an ERP document a sales person reviews **inside ERPNext**, with source evidence, deterministic validation, and no model write access. Stack: LangGraph, LangChain, LangSmith, SQLite checkpoints, ERPNext REST.
 
