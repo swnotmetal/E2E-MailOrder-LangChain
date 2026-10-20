@@ -31,3 +31,6 @@ infra/.mailpit/
 
 # Local-only handover notes (machine env, ports, credentials refs) — never pushed
 docs/handover-*.md
+
+# Local operator quick start (environment-specific commands) — never pushed
+quickstart.md

@@ -233,6 +233,29 @@ services:
       configurator:
         condition: service_completed_successfully
 
+  # An IMAP-capable mailbox, because ERPNext pulls inbound mail over IMAP and Mailpit deliberately
+  # implements only SMTP. This is what lets `Email Account` + `Append To` create records natively,
+  # with Frappe's own Message-ID deduplication, instead of this application hand-writing them.
+  greenmail:
+    image: greenmail/standalone:2.1.0
+    networks:
+      - frappe_network
+    deploy:
+      restart_policy:
+        condition: on-failure
+    ports:
+      - "127.0.0.1:3025:3025"
+      - "127.0.0.1:3143:3143"
+    environment:
+      # With auth disabled GreenMail provisions the user on first login, so it must NOT be
+      # pre-created here: a duplicate email makes UserManager throw and the IMAP socket closes
+      # mid-LOGIN, which surfaces in Frappe as "command: LOGIN => socket error: EOF".
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.all
+        -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.auth.disabled
+        -Dgreenmail.verbose
+
 volumes:
   db-data:
   redis-queue-data:

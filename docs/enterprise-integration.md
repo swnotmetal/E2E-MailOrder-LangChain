@@ -4,7 +4,7 @@
 
 In a real organization, this application would not connect an inbox directly to an ERP database. A safer boundary is: the email system receives messages, a queue absorbs bursts, LangGraph provides durable orchestration, a human-review service grants authority, and an ERP adapter calls supported business APIs. The model receives neither ERP write credentials nor permission to send email.
 
-This repository is a learning and engineering portfolio project. It does not need to prove commercial ROI; it needs to demonstrate these boundaries, recovery paths, and observable evidence honestly.
+This repository is an engineering portfolio project. It does not need to prove commercial ROI; it needs to demonstrate these boundaries, recovery paths, and observable evidence honestly.
 
 ## Target topology
 
@@ -51,7 +51,6 @@ Microsoft Graph / Gmail API / IMAP webhook
 - `src/model.ts`: the fixed Gemini 2.5 Flash-Lite understanding boundary; it has no ERP write permission.
 - `src/workflow.ts`: LangGraph routing, interrupts, revision semantics, and checkpoints.
 - `src/erp.ts`: ERPNext REST adapter; it separates inventory reads from the three writes — a `docstatus=0` Sales Order draft, a reply suggestion filed as a `ToDo` work item, and a new `Customer` with one linked `Address` (only after a human confirms the proposal). ERPNext's `Address` mandates both `city` and `country`, so the single free-text line is stored as the city and the operating company's own country as the country; an international new customer must be corrected in the ERP afterwards.
-- `src/learn.html` and `scripts/learn.ts`: a single-machine learning UI, demoted to a read-only observation console and exception queue — not an enterprise connector, a production review console, or an ERP control surface.
 - `test/mock-erp.ts`: a development test double; its results are mock evidence only.
 
 The missing enterprise components are a provider-specific email connector, an independent queue, SSO/RBAC, long-running workers, an outbound mail service, and a production database checkpointer. They should be added one at a time.
@@ -66,7 +65,7 @@ The current choice is therefore to keep a local ERPNext-compatible mock that mat
 
 ## Recommended sequence
 
-1. Run the mock ERP as a separate process and connect the learning application through `LEARN_ERP_BASE_URL`. This network boundary is already available.
+1. Run the mock ERP as a separate process so the HTTP boundary stays visible (`npm run mock:erp`).
 2. Add a mock email provider that accepts a webhook, persists raw MIME/message ID, and enqueues work.
 3. Move from an in-memory checkpoint to disk SQLite or Postgres and demonstrate interrupt recovery after a service restart.
 4. Add an “approve but do not send” email outlet, then introduce separate send approval and idempotency records.
@@ -74,17 +73,4 @@ The current choice is therefore to keep a local ERPNext-compatible mock that mat
 
 ### Exercise the separate ERP boundary
 
-Start the localhost-only, fictional ERPNext-compatible service in one terminal:
-
-```powershell
-npm run mock:erp
-```
-
-Connect the learning application from a second terminal:
-
-```powershell
-$env:LEARN_ERP_BASE_URL='http://127.0.0.1:3211'
-npm run learn
-```
-
-Stop the first process and submit an inbox message to observe an ERP read failure without an ERP write. `/__mock/status` and `/__mock/reset` exist only in this local teaching substitute; they are not ERPNext APIs.
+`npm run mock:erp` starts the localhost-only, fictional ERPNext-compatible service on `127.0.0.1:3211`. Stopping it shows an ERP read failure without any ERP write. `/__mock/status` and `/__mock/reset` exist only in this local double; they are not ERPNext APIs.

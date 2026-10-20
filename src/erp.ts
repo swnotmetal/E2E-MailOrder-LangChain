@@ -1,5 +1,5 @@
 import { type Customer, type Item, type Address, type Draft, digest, orderKey, normalize } from './domain.js';
-export type ERP = Pick<FrappeERP, 'findCustomers'|'findItems'|'inventory'|'addresses'|'duplicates'|'createDraft'|'suggestReply'|'createCustomer'>;
+export type ERP = Pick<FrappeERP, 'findCustomers'|'findItems'|'inventory'|'addresses'|'duplicates'|'createDraft'|'suggestReply'|'createCustomer'|'reviewState'>;
 export type Order = {name:string; custom_integration_key?:string; custom_review_digest?:string; docstatus:number; po_no?:string};
 export type Inventory = {itemCode:string; itemName:string; stockTracked:boolean; totalActualQty:number|null; warehouses:{warehouse:string;actualQty:number;projectedQty:number;reservedQty:number}[]};
 
@@ -8,8 +8,8 @@ export class FrappeERP {
     const url = new URL(base);
     if (!['127.0.0.1','localhost','[::1]'].includes(url.hostname)) throw Error('LOCAL_ERP_ONLY');
   }
-  async request<T>(path:string, body?:unknown): Promise<T> {
-    const res = await fetch(this.base + path, {method:body?'POST':'GET', redirect:'error',
+  async request<T>(path:string, body?:unknown, method:'POST'|'PUT'='POST'): Promise<T> {
+    const res = await fetch(this.base + path, {method:body?method:'GET', redirect:'error',
       headers:{Authorization:this.auth,'Content-Type':'application/json'},
       body:body?JSON.stringify(body):undefined, signal:AbortSignal.timeout(this.timeoutMs)});
     if (!res.ok) throw Error(`ERP_HTTP_${res.status}`) // Do not print server internals or credentials.
@@ -60,6 +60,17 @@ export class FrappeERP {
     return rows.filter(o=>normalize(o.po_no??'')===normalize(d.po));
   }
   async byKey(key:string) {return this.list<Order>('Sales Order',['name','docstatus','custom_integration_key','custom_review_digest'],[['custom_integration_key','=',key]]);}
+  // The ERP is the review surface. A human submits or cancels the draft in ERPNext, and this is
+  // how the workflow discovers what they decided. Strictly read-only: it never edits a document, and
+  // `modified_by` / `modified` are the ERP's own record of who acted and when, so the audit entry
+  // is authored by ERPNext rather than asserted by this application.
+  async reviewState(key:string):Promise<{name:string;docstatus:number;digest:string;actor:string;modified:string}|null> {
+    const rows=await this.list<{name:string;docstatus:number;custom_review_digest?:string;modified_by?:string;modified?:string}>(
+      'Sales Order',['name','docstatus','custom_review_digest','modified_by','modified'],[['custom_integration_key','=',key]]);
+    const row=rows[0];
+    if(!row) return null;
+    return {name:row.name,docstatus:Number(row.docstatus),digest:row.custom_review_digest??'',actor:row.modified_by??'',modified:row.modified??''};
+  }
   async createDraft(d:Draft):Promise<Order> {
     const key=orderKey(d), hash=digest(d);
     const reconcile = async () => {
@@ -87,17 +98,56 @@ export class FrappeERP {
   // A suggested reply is filed as a ToDo: the ERP's own "a human must act on this" object, so it
   // shows up in the work queue next to the customer. It is NOT a Communication: that is email
   // history, and filing an unsent draft there would imply correspondence that never happened.
-  async suggestReply(s:{summary:string;draft:string;mail:string;revision:string;customer?:string}):Promise<{name:string}> {
+  // A received mail IS a Communication: correspondence that really happened. This is the exact
+  // opposite of an unsent draft, which must never be filed here because it would imply an exchange
+  // that never took place. Recording it is what puts the original message on the customer's
+  // timeline, next to the work item that refers to it.
+  //
+  // Frappe restricts the Communication *list* to the human user who owns the correspondence, so
+  // this account can create one and read it back by name but cannot enumerate them. Deduplication
+  // therefore never lists Communications: the work item holds the reference and is what we look up.
+  private async fileReceivedMail(m:{subject:string;sender:string;senderName?:string;text:string;customer?:string}):Promise<{name:string}> {
+    const escape=(text:string)=>text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return this.request<{name:string}>('/api/resource/Communication', {
+      doctype:'Communication',communication_type:'Communication',communication_medium:'Email',sent_or_received:'Received',
+      sender:m.sender,...(m.senderName?{sender_full_name:m.senderName}:{}),
+      subject:m.subject||'(no subject)',
+      content:`<p>${escape(m.text).replace(/\n/g,'<br>')}</p>`,text_content:m.text,
+      ...(m.customer?{reference_doctype:'Customer',reference_name:m.customer}:{})
+    });
+  }
+  async suggestReply(s:{summary:string;draft:string;mail:string;revision:string;customer?:string;label?:string;
+    communication?:{subject:string;sender:string;senderName?:string;text:string}}):Promise<{name:string;communication:string}> {
     // The mail digest is the suggestion's identity, so re-ingesting the same message reconciles to
     // the work item that already exists instead of filing a second one. The review revision is
     // deliberately NOT used here: it also covers the model prose, which varies between runs.
-    const existing=await this.list<{name:string}>('ToDo',['name'],[['description','like',`%${s.mail}%`]]);
-    if(existing.length) return {name:existing[0].name};
-    return this.request<{name:string}>('/api/resource/ToDo', {
-      doctype:'ToDo',status:'Open',priority:'Medium',
-      description:[s.summary,'','Suggested reply (not sent):','',s.draft,'',`-- mail ${s.mail}`,`-- review revision ${s.revision}`].join('\n'),
-      ...(s.customer?{reference_type:'Customer',reference_name:s.customer}:{})
+    const existing=await this.list<{name:string;status:string;description:string;reference_type?:string;reference_name?:string}>(
+      'ToDo',['name','status','description','reference_type','reference_name'],[['description','like',`%${s.mail}%`]]);
+    // A handoff is not a suggested reply — it is work a human must do — so callers pass label:''.
+    const label=s.label===undefined?'Suggested reply (not sent):':s.label;
+    const description=[s.summary,...(label?['',label]:[]),'',s.draft,'',`-- mail ${s.mail}`,`-- review revision ${s.revision}`].join('\n');
+    if(existing.length) {
+      const current=existing[0];
+      let communication=current.reference_type==='Communication'?(current.reference_name??''):'';
+      // The work item is this application's own proposal, so a re-ingest refreshes it to the current
+      // judgement instead of leaving a stale reason behind. Only while it is still Open: once a
+      // human has worked it the description may hold their notes, which must not be overwritten.
+      const patch:Record<string,string>={};
+      if(current.status==='Open' && current.description!==description) patch.description=description;
+      if(!communication && s.communication) {
+        communication=(await this.fileReceivedMail({...s.communication,customer:s.customer})).name;
+        patch.reference_type='Communication';patch.reference_name=communication;
+      }
+      if(Object.keys(patch).length) await this.request(`/api/resource/ToDo/${encodeURIComponent(current.name)}`,patch,'PUT');
+      return {name:current.name,communication};
+    }
+    const communication=s.communication?(await this.fileReceivedMail({...s.communication,customer:s.customer})).name:'';
+    const created=await this.request<{name:string}>('/api/resource/ToDo', {
+      doctype:'ToDo',status:'Open',priority:'Medium',description,
+      ...(communication?{reference_type:'Communication',reference_name:communication}
+        :s.customer?{reference_type:'Customer',reference_name:s.customer}:{})
     });
+    return {name:created.name,communication};
   }
   // A confirmed new customer is written once and then matched forever after. Like a Sales Order,
   // this only happens after a human approves the proposal in the review — the model never creates

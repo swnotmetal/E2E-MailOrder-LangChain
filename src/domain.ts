@@ -5,10 +5,10 @@ export const fields = ['customer', 'po', 'date', 'address'] as const;
 export type Field = typeof fields[number];
 export const factFields = [...fields, 'sender', 'location'] as const;
 export type FactField = typeof factFields[number];
-export type Evidence = { source: 'email' | 'pdf'; page: number; start: number; end: number; quote: string };
+export type Evidence = { source: 'email' | 'subject' | 'sender' | 'pdf'; page: number; start: number; end: number; quote: string };
 export type Fact = { value: string; evidence: Evidence };
 export type Issue = { code: string; field: string; message: string };
-export type Source = { source: 'email' | 'pdf'; page: number; text: string };
+export type Source = { source: 'email' | 'subject' | 'sender' | 'pdf'; page: number; text: string };
 export type Extraction = { facts: Record<FactField, Fact[]>; lines: { description: Fact; quantity: Fact; unit: Fact }[];
   intent?:{kind:'purchase'|'inquiry'|'conditional'|'unclear';evidence:Fact}; reply?:{language:string}; traceId?:string; warnings?:Issue[] };
 export type Customer = { name: string; customer_name: string };
@@ -42,6 +42,14 @@ export const InquiryDecisionSchema=z.object({
   reason:z.string(),responseDraft:z.string().trim().optional()
 }).strict();
 export type InquiryDecision=z.infer<typeof InquiryDecisionSchema>;
+// The only decision the application accepts is one the ERP already recorded: a human submitted the
+// draft, or cancelled it. `actor` comes from ERPNext's `modified_by`, so the audit names the person
+// who acted rather than accepting a name typed into a form.
+export const ErpReviewDecisionSchema=z.object({
+  action:z.enum(['approve','reject']),revision:z.string(),actor:z.string().trim().min(1),
+  reason:z.string(),source:z.literal('erpnext'),erpDocument:z.string().trim().min(1)
+}).strict();
+export type ErpReviewDecision=z.infer<typeof ErpReviewDecisionSchema>;
 export const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const normalize = (s: string) => s.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
 export const orderKey = (d: Draft) => digest([d.customer, normalize(d.po)]);
@@ -63,6 +71,14 @@ export function normalizeDate(s: string): string {
     if (validDate(iso)) return iso;
   }
   return t;
+}
+/** Strips thousands separators, but only when the whole value is a validly grouped integer.
+ *  A comma followed by one or two digits ("1,5") is a decimal in German, Russian or Ukrainian,
+ *  so it is left alone and blocked for a human: silently reading 1,5 as 15 would multiply a
+ *  real order line by ten, which is far worse than a review prompt. */
+export function normalizeQuantity(s: string): string {
+  const value = s.replace(/[\s\u00a0\u202f]+/g, ' ').trim();
+  return /^\d{1,3}(?:[,\u00a0\u202f ]\d{3})+$/.test(value) ? value.replace(/\D/g, '') : value;
 }
 export function validate(d: Draft): Issue[] {
   const issues: Issue[] = [];
@@ -89,7 +105,11 @@ export function orderConformance(extracted: Extraction, issues: Issue[]): string
 export function inquiryConformance(extracted: Extraction, replyDraft: string): string {
   const kind = extracted.intent?.kind;
   if (kind !== 'inquiry' && kind !== 'conditional') return 'the intent is not a determinate inquiry';
-  if ((extracted.warnings ?? []).length) return `extraction warnings: ${[...new Set((extracted.warnings ?? []).map(w => w.code))].join(', ')}`;
+  // A reply promises to check, it does not ship anything, so an unresolved address role (shipping
+  // versus billing) is not a reason to stop answering. Every other warning still blocks, because
+  // the reply may repeat it back to the customer.
+  const blocking = (extracted.warnings ?? []).filter(w => w.code !== 'UNRESOLVED_ADDRESS_ROLE');
+  if (blocking.length) return `extraction warnings: ${[...new Set(blocking.map(w => w.code))].join(', ')}`;
   if (!replyDraft.trim()) return 'the reply draft is empty';
   return '';
 }

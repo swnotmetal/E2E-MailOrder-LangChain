@@ -39,21 +39,13 @@ ERP_TOKEN=<api_key>:<api_secret>
 
 Never copy this token by hand. Every HTTP header value must be Latin-1, so a single non-ASCII character (for example a Chinese character left in from a placeholder) makes every request fail with `Cannot convert argument to a ByteString because the character at index … is greater than 255`.
 
-## 4. Connect the lab to the real ERP
+## 4. Point the workflow at the real ERP
 
-Read the token from `.env.erp` instead of pasting it:
+The token lives in `.env.erp`. Never paste it by hand: a single non-ASCII character in an HTTP header value fails every request with `Cannot convert argument to a ByteString`.
 
 ```powershell
-$tok = (Get-Content .env.erp | Where-Object { $_ -like 'ERP_TOKEN=*' }) -replace '^ERP_TOKEN=',''
-$env:LEARN_ERP_BASE_URL = 'http://127.0.0.1:8080'
-$env:LEARN_ERP_AUTH     = "token $tok"
-$env:LEARN_ERP_COMPANY  = 'Nordic Parts Demo'
-npm run learn
+$env:ERP_ENV_FILE = '.env.erp'
 ```
-
-Open <http://127.0.0.1:3210>. The summary line should read `external ERP (no mock write counter)`.
-
-With **no** env vars, `npm run learn` uses the in-process mock ERP instead — that is the fastest way to try the UI, and it needs neither WSL nor the ERP. The lab's "Clear lab state" never deletes ERP data: it only clears the in-memory lab state.
 
 ## 5. Use the CLI against the real ERP
 
@@ -82,8 +74,7 @@ wsl -d Ubuntu -u root -- /usr/bin/docker compose -p order-review-demo -f "$r/inf
 ## Troubleshooting
 
 - **`connection refused` on :8080** — WSL was terminated. Re-run `.\infra\start-wsl.ps1`.
-- **`EADDRINUSE` on :3210** — an old lab is still running: `Get-NetTCPConnection -LocalPort 3210 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess }`.
-- **`Cannot convert argument to a ByteString`** — `LEARN_ERP_AUTH` / `ERP_TOKEN` contains a non-ASCII character. Re-read it from `.env.erp` (step 4).
+- **`Cannot convert argument to a ByteString`** — `ERP_TOKEN` contains a non-ASCII character. Re-read it from `.env.erp` (step 4).
 - **Site creation looks stuck** — inspect `docker compose -p order-review-demo -f infra/compose.yaml logs create-site`.
 
 ## Verified

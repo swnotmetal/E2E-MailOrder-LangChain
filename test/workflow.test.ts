@@ -8,7 +8,7 @@ import { Command } from '@langchain/langgraph';
 import { joinPdfItems, readSources, templateExtractor, verifyEvidence } from '../src/input.js';
 import { workflow } from '../src/workflow.js';
 import { FrappeERP } from '../src/erp.js';
-import { validate, normalizeDate, type Decision, type InquiryDecision } from '../src/domain.js';
+import { validate, normalizeDate, normalizeQuantity, type Decision, type InquiryDecision } from '../src/domain.js';
 import { mockERP } from './mock-erp.js';
 
 async function setup() {
@@ -59,6 +59,15 @@ test('natural-language dates are normalised to YYYY-MM-DD; relative dates stay f
   assert.equal(normalizeDate('March 8, 2027'),'2027-03-08');
   assert.equal(normalizeDate('2027-03-05'),'2027-03-05');
   assert.equal(normalizeDate('next Friday'),'next Friday');
+});
+test('grouped quantities are ungrouped but locale decimals stay for a human',()=>{
+  assert.equal(normalizeQuantity('5,000'),'5000');
+  assert.equal(normalizeQuantity('10 000'),'10000');
+  assert.equal(normalizeQuantity('1,234,567'),'1234567');
+  assert.equal(normalizeQuantity('12'),'12');
+  // A decimal comma is ambiguous across locales and must never be silently multiplied by ten.
+  assert.equal(normalizeQuantity('1,5'),'1,5');
+  assert.equal(normalizeQuantity('0,25'),'0,25');
 });
 test('a natural-language order normalises its date and unit to pass validation',async()=>{
   const x=await setup();try{

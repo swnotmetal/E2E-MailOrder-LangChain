@@ -3,8 +3,8 @@ import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { type ERP } from './erp.js';
 import { catalogSearchTool, inventoryTool, type CatalogCandidate } from './model.js';
 import { templateExtractor, verifyEvidence, type Extractor } from './input.js';
-import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type Decision, type InquiryCase, type InquiryLine, type NewCustomer,
-  DecisionSchema, InquiryDecisionSchema, validate, orderConformance, inquiryConformance, normalize, normalizeDate, digest, fields } from './domain.js';
+import { type Source, type Extraction, type Draft, type Issue, type Customer, type Item, type Address, type InquiryCase, type InquiryLine, type NewCustomer,
+  ErpReviewDecisionSchema, validate, orderConformance, inquiryConformance, normalize, normalizeDate, normalizeQuantity, digest, fields } from './domain.js';
 
 const State = Annotation.Root({
   sources:Annotation<Source[]>(), extracted:Annotation<Extraction>(), draft:Annotation<Draft>(),
@@ -12,6 +12,7 @@ const State = Annotation.Root({
   availability:Annotation<InquiryLine[]>(),
   issues:Annotation<Issue[]>(), status:Annotation<string>(), revision:Annotation<string>(), conformance:Annotation<string>(),
   decision:Annotation<unknown>(), newCustomer:Annotation<NewCustomer|undefined>(), inquiry:Annotation<InquiryCase>(), order:Annotation<string>(), suggestion:Annotation<string>(), customerNote:Annotation<string>(),
+  erpDocument:Annotation<string>(),
   audit:Annotation<unknown[]>({reducer:(a,b)=>a.concat(b),default:()=>[]})
 });
 
@@ -36,6 +37,21 @@ function matchingItems(items:Item[],text:string) {
 // Addresses differ only by punctuation ("NSW 2000" vs "NSW, 2000"); compare on letters/digits so
 // the mail's free-text address matches the ERP's stored line without a human fixing commas.
 const loose=(s:string)=>normalize(s).replace(/[^\p{L}\p{N}\s]/gu,'');
+// Identity and body of the incoming message, for the ERP's own record of the correspondence. The
+// subject and sender are separate sources, so this reads them instead of re-parsing headers.
+// The work item's identity is the message itself — sender, subject, body — not the source list,
+// which grows as more metadata is kept. Keying on sources would re-file every message as a new work
+// item the moment a source is added.
+const mailIdentity=(sources:Source[])=>{
+  const pick=(kind:Source['source'])=>sources.find(x=>x.source===kind)?.text??'';
+  return digest([pick('sender'),pick('subject'),pick('email')]);
+};
+const mailRecord=(s:{sources:Source[];senderName?:string})=>({
+  subject:s.sources.find(x=>x.source==='subject')?.text??'',
+  sender:s.sources.find(x=>x.source==='sender')?.text??'',
+  senderName:s.senderName||undefined,
+  text:s.sources.find(x=>x.source==='email')?.text??''
+});
 
 function replyLanguage(sourceText:string,modelLanguage?:string) {
   if(/\p{Script=Han}/u.test(sourceText)) return 'zh';
@@ -208,7 +224,8 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const {customer,senderName,customerText,intent,condition,requestedDate,responseDraft}=s.inquiry;
       const summary=`Inquiry from ${senderName||'an unnamed sender'} (${customer||customerText||'not matched to an ERP customer'}) — ${intent}`
         +`${condition?`\nThey asked: ${condition}`:''}${requestedDate?`\nRequested delivery: ${requestedDate}`:''}`;
-      const suggestion=await erp.suggestReply({summary,draft:responseDraft,mail:digest(s.sources),revision:s.revision,customer});
+      const suggestion=await erp.suggestReply({summary,draft:responseDraft,mail:mailIdentity(s.sources),revision:s.revision,customer,
+        communication:mailRecord({sources:s.sources,senderName})});
       // Reached straight from draftInquiryReply this was an automatic proposal; reached from
       // inquiryReview a human approved the text first. The audit records which one happened.
       const auto=!s.conformance;
@@ -216,18 +233,17 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       if(auto) audit.push(...await noticeFailures({kind:'reply-suggestion',reference:suggestion.name,customer,summary}));
       return {suggestion:suggestion.name,status:'suggested',audit};
     })
-    .addNode('inquiryReview',s=>{
-      let feedback='';
-      for(;;){
-        const parsed=InquiryDecisionSchema.safeParse(interrupt({kind:'inquiry',revision:s.revision,inquiry:s.inquiry,status:s.status,feedback}));
-        if(!parsed.success){feedback='INVALID_INQUIRY_DECISION';continue;}
-        if(parsed.data.revision!==s.revision){feedback='STALE_APPROVAL';continue;}
-        if(parsed.data.action==='approve-reply' && !(parsed.data.responseDraft??'').trim()){feedback='REPLY_DRAFT_EMPTY: write the reply or close the ticket';continue;}
-        const decision=parsed.data;
-        return {decision,inquiry:{...s.inquiry,responseDraft:decision.responseDraft??s.inquiry.responseDraft},audit:[decision],
-          status:decision.action==='approve-reply'?'response-approved':decision.action==='close'?'closed':'inquiry-review',
-          revision:digest([s.revision,decision])};
-      }
+    .addNode('handoffInquiry',async s=>{
+      // Nothing automatic can be said about this message, so it becomes a work item in ERPNext —
+      // the ERP's own "a human must act on this" object — instead of an in-app approval prompt.
+      const reason=s.conformance||'the message is not a determinate inquiry';
+      const body=['This message was not answered automatically.','',`Reason: ${reason}`,'',
+        `Sender: ${s.inquiry.senderName||'(unnamed)'}`,`Customer: ${s.inquiry.customer||'(not matched)'}`,`Intent: ${s.inquiry.intent}`,
+        ...(s.inquiry.responseDraft.trim()?['','Draft reply (not sent):','',s.inquiry.responseDraft]:[])].join('\n');
+      const todo=await erp.suggestReply({summary:`Inquiry needs a human — ${s.inquiry.senderName||'unnamed sender'} (${s.inquiry.intent})`,
+        draft:body,mail:mailIdentity(s.sources),revision:s.revision,customer:s.inquiry.customer,label:'',
+        communication:mailRecord({sources:s.sources,senderName:s.inquiry.senderName})});
+      return {suggestion:todo.name,status:'needs-human',audit:[{action:'handoff',actor:'assistant',revision:s.revision,reason:`filed ToDo ${todo.name}: ${reason}`}]};
     })
     .addNode('match',async s=>{
       const e=s.extracted, issues:Issue[]=[...(s.extracted.warnings??[])];
@@ -245,7 +261,7 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const draft:Draft={customer,po:value('po'),date:normalizeDate(value('date')),address:addressMatches.length===1?addressMatches[0].name:'',
         lines:(pdf.length?pdf:email).map(l=>{
           const exact=matchingItems(items,l.description.value);
-          return {description:l.description.value,item:exact.length===1?exact[0].name:'',quantity:l.quantity.value,unit:exact.length===1?exact[0].stock_uom:l.unit.value};
+          return {description:l.description.value,item:exact.length===1?exact[0].name:'',quantity:normalizeQuantity(l.quantity.value),unit:exact.length===1?exact[0].stock_uom:l.unit.value};
         })};
       issues.push(...await checkERP(draft));
       if(draft.customer && draft.po && (await erp.duplicates(draft)).length) issues.push({code:'DUPLICATE_PO',field:'po',message:'ERP already contains this customer PO; commit will reconcile only an identical integration draft'});
@@ -261,64 +277,83 @@ export function workflow(erp:ERP, saver:SqliteSaver, extract:Extractor=templateE
       const customerNote=noteLines.length?draftOrderNote(senderName,noteLines,language):'';
       return {draft,customers,items,addresses,issues,newCustomer,customerNote,conformance:orderConformance(s.extracted,issues),revision:digest([s.sources,draft]),status:'review'};
     })
-    .addNode('review',s=>{
-      let decision:Decision;
+    // The ERP is the review surface, so this node decides nothing. It waits for a decision a human
+    // already made in ERPNext — Submit or Cancel — which scripts/review-sync.ts carries back as
+    // Command({resume}). The actor and timestamp are ERPNext's record, not something we assert.
+    .addNode('awaitErpReview',s=>{
       let feedback='';
-      for (;;) {
-        const parsed=DecisionSchema.safeParse(interrupt({kind:'order',revision:s.revision,draft:s.draft,issues:s.issues,customers:s.customers,items:s.items,addresses:s.addresses,newCustomer:s.newCustomer,customerNote:s.customerNote,status:s.status,feedback}));
-        if(!parsed.success) {feedback='INVALID_DECISION: check the review JSON shape';continue;}
-        if(parsed.data.revision!==s.revision) {feedback='STALE_APPROVAL: export the current review';continue;}
-        if(parsed.data.action==='approve' && s.issues.length && !parsed.data.reason.trim()) {feedback='RESOLUTION_REASON_REQUIRED';continue;}
-        decision=parsed.data; break;
+      for(;;){
+        const parsed=ErpReviewDecisionSchema.safeParse(interrupt({kind:'order-review',revision:s.revision,erpDocument:s.erpDocument,
+          draft:s.draft,issues:s.issues,status:s.status,feedback}));
+        if(!parsed.success){feedback='INVALID_ERP_DECISION: expected the ERP review shape';continue;}
+        if(parsed.data.revision!==s.revision){feedback='STALE_APPROVAL: the draft changed after this review opened';continue;}
+        if(parsed.data.erpDocument!==s.erpDocument){feedback='DOCUMENT_MISMATCH: this decision belongs to another draft';continue;}
+        const decision=parsed.data;
+        return {decision,status:decision.action==='approve'?'submitted':'cancelled',
+          audit:[{action:decision.action==='approve'?'human-submitted':'human-cancelled',actor:decision.actor,
+            revision:s.revision,erpDocument:s.erpDocument,reason:decision.reason}]};
       }
-      return {decision,draft:decision.draft,customerNote:decision.customerNote??s.customerNote,audit:[decision],status:decision.action==='approve'?'approved':decision.action==='reject'?'rejected':'needs-info',revision:digest([s.revision,decision])};
+    })
+    // Everything the ERP cannot represent as a draft stops here. A Sales Order needs a customer, a
+    // linked address, resolvable items and valid quantities; rather than invent any of them, the
+    // work becomes a ToDo in ERPNext, where the sales person already works.
+    .addNode('handoffOrder',async s=>{
+      const gaps=[...new Set(s.issues.map(issue=>issue.message))];
+      const lines=s.draft.lines.map((l,i)=>`${i+1}. ${l.description} — ${l.quantity} ${l.unit}${l.item?` [${l.item}]`:''}`);
+      const body=['No Sales Order draft was created: this order does not satisfy the ERP yet.','',
+        'Gaps:',...gaps.map(gap=>`- ${gap}`),'',
+        'Extracted lines:',...lines,'',
+        `Customer: ${s.draft.customer||'(not matched)'}`,`Customer PO: ${s.draft.po||'(missing)'}`,`Delivery date: ${s.draft.date||'(missing)'}`,
+        ...(s.customerNote.trim()?['','Suggested note to the customer:','',s.customerNote]:[])].join('\n');
+      // The work-item key is the mail's own identity, never a route-specific suffix: if the same
+      // message is later judged differently, it refreshes one work item instead of filing a second.
+      const todo=await erp.suggestReply({summary:`Order needs a human — ${s.draft.customer||'unmatched sender'} (PO ${s.draft.po||'none'})`,
+        draft:body,mail:mailIdentity(s.sources),revision:s.revision,customer:s.draft.customer,label:'',
+        communication:mailRecord({sources:s.sources,senderName:s.extracted?.facts?.sender?.[0]?.value})});
+      return {suggestion:todo.name,status:'needs-human',
+        audit:[{action:'handoff',actor:'assistant',revision:s.revision,reason:`${gaps.length} gap(s); filed ToDo ${todo.name}`}]};
     })
     .addNode('write',async s=>{
-      // A human can confirm a new customer in the review; it is created before the order so the
-      // draft's customer/address point at records that now exist. The model never creates one.
       let draft=s.draft;
-      const newCustomer=(s.decision as {newCustomer?:NewCustomer}|undefined)?.newCustomer;
-      if(newCustomer) {
-        const created=await erp.createCustomer(newCustomer);
-        draft={...draft,customer:created.name,address:created.address??draft.address};
-      }
       // A customer-facing note exists only when the order named an item the catalog cannot confirm.
       // It is filed as an ERP work item (never sent) only after a human approves, and reconciles by
       // digest so re-approving after a fix does not file a second copy.
       const customerNote=(s.customerNote??'').trim();
       if(customerNote) {
         await erp.suggestReply({summary:`Order note for ${draft.customer||'an unmatched customer'} (PO ${draft.po||'none'}) — item(s) to confirm with the customer`,
-          draft:customerNote,mail:digest([s.sources,'order-note']),revision:s.revision,customer:draft.customer});
+          draft:customerNote,mail:digest([mailIdentity(s.sources),'order-note']),revision:s.revision,customer:draft.customer,
+          communication:mailRecord({sources:s.sources,senderName:s.extracted?.facts?.sender?.[0]?.value})});
       }
       const issues=await checkERP(draft);
-      if(issues.length) return {issues,status:'review',revision:digest([s.revision,issues])};
+      if(issues.length) return {issues,status:'needs-human',revision:digest([s.revision,issues])};
       let order;
       try {order=await erp.createDraft(draft);}
       catch(error) {
         if(error instanceof Error && error.message.startsWith('DUPLICATE')) {
           const issues=[{code:'DUPLICATE_PO',field:'po',message:error.message}];
-          return {issues,status:'review',revision:digest([s.revision,issues])};
+          return {issues,status:'needs-human',revision:digest([s.revision,issues])};
         }
         throw error; // Transport failures remain at this durable node for explicit retry.
       }
       if(order.docstatus!==0) throw Error('ERP_RETURNED_NON_DRAFT');
-      // Reached straight from match() this was an automatic proposal; reached from review()
-      // a human approved it first. The audit records which one happened.
-      const auto=!s.conformance;
-      const audit:unknown[]=auto?[{action:'auto-propose',actor:'assistant',revision:s.revision,reason:'deterministic validation passed; a human still reviews and submits this draft in the ERP'}]:[];
-      if(auto) audit.push(...await noticeFailures({kind:'order-draft',reference:order.name,customer:draft.customer,
+      // This path is only reached when deterministic validation passed, so the draft is proposed
+      // without a human prompt. The human decision happens afterwards, in ERPNext: the draft is
+      // submitted or cancelled there, and awaitErpReview records what the ERP says happened.
+      const audit:unknown[]=[{action:'auto-propose',actor:'assistant',revision:s.revision,reason:'deterministic validation passed; a human submits or cancels this draft in the ERP'}];
+      audit.push(...await noticeFailures({kind:'order-draft',reference:order.name,customer:draft.customer,
         summary:`Sales Order draft ${order.name} for ${draft.customer||'an unmatched customer'} (PO ${draft.po||'none'})`}));
-      return {order:order.name,draft,status:'created',issues:[],audit};
+      return {order:order.name,erpDocument:order.name,draft,status:'created',issues:[],audit};
     })
     .addEdge(START,'extract')
     .addEdge('extract','resolveInventory')
     .addConditionalEdges('resolveInventory',s=>s.extracted.intent?.kind==='purchase'||(!s.extracted.intent&&!s.extracted.warnings?.some(w=>w.field==='intent'))?'match':'prepareInquiry',['prepareInquiry','match'])
     .addEdge('prepareInquiry','draftInquiryReply')
-    .addConditionalEdges('draftInquiryReply',s=>s.conformance?'inquiryReview':'suggestInquiry',['inquiryReview','suggestInquiry'])
-    .addConditionalEdges('inquiryReview',s=>s.status==='response-approved'?'suggestInquiry':s.status==='inquiry-review'?'inquiryReview':END,['suggestInquiry','inquiryReview',END])
+    .addConditionalEdges('draftInquiryReply',s=>s.conformance?'handoffInquiry':'suggestInquiry',['handoffInquiry','suggestInquiry'])
+    .addEdge('handoffInquiry',END)
     .addEdge('suggestInquiry',END)
-    .addConditionalEdges('match',s=>s.conformance?'review':'write',['review','write'])
-    .addConditionalEdges('review',s=>s.status==='approved'?'write':s.status==='needs-info'?'review':END,['write','review',END])
-    .addConditionalEdges('write',s=>s.status==='created'?END:'review',[END,'review'])
+    .addConditionalEdges('match',s=>s.conformance?'handoffOrder':'write',['handoffOrder','write'])
+    .addConditionalEdges('write',s=>s.status==='created'?'awaitErpReview':'handoffOrder',['awaitErpReview','handoffOrder'])
+    .addEdge('awaitErpReview',END)
+    .addEdge('handoffOrder',END)
     .compile({checkpointer:saver});
 }

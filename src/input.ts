@@ -31,6 +31,13 @@ export async function readSources(email: string, pdf?: string): Promise<Source[]
   const text = decoded ? decoded.text : raw;
   if (!text.trim()) throw Error('NO_MAIL_TEXT');
   const sources: Source[] = [{source:'email',page:0,text}];
+  // The subject is its own source, not a prefix on the body. Business references — a customer PO,
+  // an order or ticket number — very often exist only there, and merging it into the body would
+  // forge offsets the original message never had. It stays separately citable and still verified.
+  if (decoded?.subject.trim()) sources.push({source:'subject',page:0,text:decoded.subject.trim()});
+  // The sender address is metadata the ERP needs to record the mail against, so it is its own
+  // source rather than something the model has to guess out of a signature.
+  if (decoded?.from.trim()) sources.push({source:'sender',page:0,text:decoded.from.trim()});
   const attachments = decoded ? decoded.pdfs.map(attachment=>attachment.content) : [];
   if (pdf) attachments.push(await readFile(pdf));
   let page = 0;

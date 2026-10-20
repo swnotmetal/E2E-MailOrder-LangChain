@@ -237,16 +237,6 @@ export function geminiInquiryReply(dataDir:string) {
   };
 }
 
-export async function recordHumanReviewFeedback(runId:string,input:{action:string;actor:string;reason:string;correction:Record<string,unknown>}) {
-  if(process.env.ORDER_TRACE!=='true'||!process.env.LANGSMITH_API_KEY)return undefined;
-  const client=new Client({apiKey:process.env.LANGSMITH_API_KEY,apiUrl:process.env.LANGSMITH_ENDPOINT});
-  const project=await client.readProject({projectName:process.env.LANGSMITH_PROJECT??'order-review-demo'});
-  const feedback=await client.createFeedback({runId,sessionId:project.id,key:'human_review_approved',
-    score:input.action==='approve'||input.action==='approve-reply',value:input.action,
-    correction:input.correction,comment:input.reason,sourceInfo:{actor:input.actor},feedbackSourceType:'app'});
-  return feedback.id;
-}
-
 export async function geminiInventoryAnswer(question:string,erp:Pick<FrappeERP,'inventory'>,dataDir:string) {
   if(!process.env.GOOGLE_API_KEY) throw Error('GOOGLE_API_KEY required for inventory question');
   if(Buffer.byteLength(question,'utf8')>1000) throw Error('MODEL_INPUT_LIMIT: inventory question exceeds 1000 bytes');
