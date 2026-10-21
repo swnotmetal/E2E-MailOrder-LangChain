@@ -1,0 +1,56 @@
+name: ERP integration (manual)
+
+# This is the only job that boots the real stack: ERPNext (8 containers) + GreenMail.
+# It is manual on purpose — it needs ~10 minutes and a 7 GB runner, so it must not run on every push.
+# No model calls: nothing here needs GOOGLE_API_KEY, and nothing spends money.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  erp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker engine
+        run: docker version --format '{{.Server.Version}}'
+
+      - name: Start ERPNext (infra/start.sh)
+        run: bash infra/start.sh
+
+      - name: Install the Inquiry DocType (infra/seed-inquiry.sh)
+        run: bash infra/seed-inquiry.sh
+
+      - name: Re-run both seeds to prove they are idempotent
+        run: |
+          bash infra/start.sh
+          bash infra/seed-inquiry.sh
+
+      - name: Assert the review surface exists
+        run: |
+          compose=(docker compose -p order-review-demo -f infra/compose.yaml)
+          # A missing DocType raises DoesNotExistError and fails this step; 0 rows is fine.
+          "${compose[@]}" exec -T -w /home/frappe/frappe-bench backend \
+            bench --site frontend execute frappe.client.get_count --kwargs '{"doctype":"Inquiry"}'
+          "${compose[@]}" exec -T -w /home/frappe/frappe-bench backend \
+            bench --site frontend execute frappe.client.get_list \
+            --kwargs '{"doctype":"Workflow","filters":{"workflow_name":"Inquiry Review"},"fields":["name","is_active"]}' \
+            | tee workflow.json
+          grep -q 'Inquiry Review' workflow.json
+
+      - name: Assert opening stock was recorded
+        run: |
+          compose=(docker compose -p order-review-demo -f infra/compose.yaml)
+          count=$("${compose[@]}" exec -T -w /home/frappe/frappe-bench backend \
+            bench --site frontend execute frappe.client.get_count \
+            --kwargs '{"doctype":"Stock Ledger Entry"}' | tr -d '[:space:]')
+          echo "Stock Ledger Entries: $count"
+          [ "$count" -gt 0 ]
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose -p order-review-demo -f infra/compose.yaml stop

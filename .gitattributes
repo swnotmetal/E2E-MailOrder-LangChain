@@ -1,0 +1,7 @@
+# Shell scripts must keep LF endings: a CRLF shebang fails in Linux with "/bin/bash^M: bad interpreter".
+# PowerShell scripts are tolerant either way, so they are left to the platform default.
+*.sh text eol=lf
+
+# Keep the compose/seeding inputs stable across checkouts.
+*.py text eol=lf
+*.yaml text eol=lf

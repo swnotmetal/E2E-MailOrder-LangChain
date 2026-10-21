@@ -4,7 +4,7 @@ A bounded B2B email-to-ERP workflow in TypeScript: turn a customer email into an
 
 All names, mail, and records are fictional. Every live model path uses only `gemini-2.5-flash-lite`; deterministic tests make no model calls.
 
-**Run it:** [docs/run-erp.md](docs/run-erp.md) — start the local ERPNext and drive the whole flow.
+**Run it:** [docs/run-erp.md](docs/run-erp.md) — start the local ERPNext and drive the whole flow. Every command, in order, with what it does and why: [docs/commands.md](docs/commands.md).
 
 ## Flow
 
@@ -33,7 +33,7 @@ npm run check          # tsc --noEmit
 npm test
 ```
 
-`npm test` is mid-refactor: part of the suite still asserts the previous in-app review model and fails. `npm run check` is clean, and the behaviour that does hold is listed under Reliability below. There is no application UI — mail arrives through the ERP and the record a human works is an `Inquiry` in ERPNext.
+`npm test` runs 61 deterministic tests and `npm run check` is clean; CI runs both plus the failure lab. There is no application UI — mail arrives through the ERP and the record a human works is an `Inquiry` in ERPNext.
 
 ## Human control is the ERP's, not ours
 

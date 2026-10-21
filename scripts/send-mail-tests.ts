@@ -42,8 +42,13 @@ try {
     const info = await transport.sendMail({ from: mail.from, to: mail.to, subject: mail.subject, text: mail.body });
     console.log(`Sent "${mail.subject}" from ${mail.from} (${info.messageId})`);
   }
-  console.log(`\n${messages.length} messages delivered to Mailpit over SMTP (${endpoint})`);
-  console.log('Read them at http://127.0.0.1:8025');
+  // Never claim a specific product: the same SMTP endpoint can be Mailpit (:1025) or GreenMail (:3025),
+  // and telling someone to open the Mailpit inbox after sending to GreenMail wastes their time.
+  const greenMail = Number(port) === 3025;
+  console.log(`\n${messages.length} messages delivered over SMTP to ${endpoint}`);
+  console.log(greenMail
+    ? 'This is GreenMail, the IMAP mailbox the ERP pulls from. Nothing appears in Mailpit. Next:\n  bench --site frontend execute frappe.email.doctype.email_account.email_account.pull\n  npm run inquiry:sync'
+    : 'This is Mailpit. It has no IMAP, so the ERP cannot pull from it. Read it at http://127.0.0.1:8025');
 } finally {
   transport.close();
 }
