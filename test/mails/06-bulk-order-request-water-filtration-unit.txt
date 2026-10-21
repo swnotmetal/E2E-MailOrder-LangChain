@@ -1,0 +1,17 @@
+From: john.smith@London-aquatics.co.uk
+To: sales@example.invalid
+Subject: Bulk Order Request: Water Filtration Units
+
+Dear Customer Support,
+
+We are looking to replace our facility's water purification system. Do you carry the following parts in bulk?
+
+* Bio-Filter Matrix Z1 - 500 Units
+* Smart Router G1 - 10 Units
+
+We need these shipped to our regional depot:
+Depot 3B, Sector 5, Industrial Estate, Cardiff, UK.
+
+Kind regards,
+John Smith
+Operations Manager | London Aquatics Group

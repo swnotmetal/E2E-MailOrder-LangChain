@@ -1,40 +1,54 @@
-// Stands in for external senders: splits test/mail-tests.txt into messages and posts each one over
-// real SMTP into the local mailbox, so the ERP's own inbox can pick them up.
-import { readFile } from 'node:fs/promises';
+// Stands in for external senders: posts every file in test/mails over real SMTP, so the ERP's own
+// inbox can pull them. One file per message, so adding or editing a mail can never merge two mails.
+//
+// A mail file is strict on purpose: three header lines in this exact order, one blank line, body.
+// Anything else fails immediately with the file name and the offending line, instead of being
+// guessed at.
+import { readFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { createTransport } from 'nodemailer';
 
-const source = process.argv[2] ?? 'test/mail-tests.txt';
+const source = process.argv[2] ?? 'test/mails';
 const endpoint = process.env.MAILPIT_SMTP ?? '127.0.0.1:1025';
 const [host, port] = endpoint.split(':');
 
-const text = await readFile(source, 'utf8');
-// Blocks are separated by a line of three or more dashes, but a hand-edited file often loses one.
-// Every message starts with `From:`, so also split there: a missing separator then still yields
-// one message per sender instead of two senders merged into one garbled mail.
-const blocks = text
-  .split(/^\s*-{3,}\s*$/m)
-  .flatMap(part => part.split(/^(?=From:)/m))
-  .map(block => block.trim())
-  .filter(Boolean);
-if (!blocks.length) throw Error('NO_MESSAGES: expected blocks separated by a line of dashes');
+const FIELDS = ['From', 'To', 'Subject'] as const;
 
-const messages = blocks.map((block, index) => {
-  // Headers end at the first line that is not itself a header. That is normally the blank line,
-  // but hand-written test files often omit it, so a missing blank line is tolerated rather than
-  // rejected: the first prose line simply marks where the body starts.
-  const lines = block.split(/\r?\n/);
-  const headerEnd = lines.findIndex(line => !/^[A-Za-z][A-Za-z-]*:/.test(line));
-  if (headerEnd === -1) throw Error(`NO_BODY: message ${index + 1} has headers but no body`);
-  const headers = lines.slice(0, headerEnd);
-  const header = (name: string) =>
-    headers.find(line => line.toLowerCase().startsWith(`${name.toLowerCase()}:`))?.slice(name.length + 1).trim() ?? '';
-  if (!header('From') || !header('To') || !header('Subject')) {
-    throw Error(`INCOMPLETE_HEADERS: message ${index + 1} needs From, To and Subject`);
+async function mailFiles(): Promise<string[]> {
+  if (source.endsWith('.txt')) return [source];
+  const names = (await readdir(source)).filter(name => name.endsWith('.txt')).sort();
+  if (!names.length) throw Error(`NO_MESSAGES: ${source} contains no .txt file`);
+  return names.map(name => join(source, name));
+}
+
+function parse(file: string, raw: string) {
+  const lines = raw.replace(/^\uFEFF/, '').split(/\r?\n/);
+  for (let index = 0; index < FIELDS.length; index += 1) {
+    const expected = `${FIELDS[index]}:`;
+    const actual = (lines[index] ?? '').slice(0, expected.length);
+    if (actual.toLowerCase() !== expected.toLowerCase()) {
+      throw Error(
+        `${file}: line ${index + 1} must start with "${expected}", found "${lines[index] ?? ''}".\n` +
+        'Expected format:\n  From: someone@example.com\n  To: sales@example.invalid\n  Subject: ...\n  <blank line>\n  body');
+    }
   }
-  // The block's own headers are transport metadata and must never be re-sent inside the body.
-  return { from: header('From'), to: header('To'), subject: header('Subject'),
-    body: lines.slice(headerEnd).join('\n').replace(/^\r?\n/, '') };
-});
+  if ((lines[3] ?? '').trim() !== '') {
+    throw Error(`${file}: line 4 must be empty. The body starts on line 5; a value here usually means a stray header.`);
+  }
+  const field = (index: number) => lines[index].slice(FIELDS[index].length + 1).trim();
+  const from = field(0), to = field(1), subject = field(2);
+  for (const [name, value] of [['From', from], ['To', to]] as const) {
+    if (!value.includes('@')) throw Error(`${file}: ${name} is not an address ("${value}")`);
+  }
+  const body = lines.slice(4).join('\n').trim();
+  if (!body) throw Error(`${file}: body is empty`);
+  return { from, to, subject, body };
+}
+
+const messages: { from: string; to: string; subject: string; body: string }[] = [];
+for (const file of await mailFiles()) {
+  messages.push(parse(file, await readFile(file, 'utf8')));
+}
 
 const transport = createTransport({ host, port: Number(port), secure: false, ignoreTLS: true });
 try {
@@ -47,7 +61,7 @@ try {
   const greenMail = Number(port) === 3025;
   console.log(`\n${messages.length} messages delivered over SMTP to ${endpoint}`);
   console.log(greenMail
-    ? 'This is GreenMail, the IMAP mailbox the ERP pulls from. Nothing appears in Mailpit. Next:\n  bench --site frontend execute frappe.email.doctype.email_account.email_account.pull\n  npm run inquiry:sync'
+    ? 'This is GreenMail, the IMAP mailbox the ERP pulls from. Nothing appears in Mailpit.\nUse `npm run demo` to pull them into ERPNext and file the Inquiries.'
     : 'This is Mailpit. It has no IMAP, so the ERP cannot pull from it. Read it at http://127.0.0.1:8025');
 } finally {
   transport.close();

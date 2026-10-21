@@ -105,10 +105,40 @@ $env:MAILPIT_SMTP='127.0.0.1:3025'
 npm run mail:tests
 ```
 
-`mail:tests` splits `test/mail-tests.txt` into one message per `From:` block and posts each over
-SMTP to the host in `MAILPIT_SMTP`. The default is `127.0.0.1:1025` (Mailpit), so you **must** set
-it to `:3025` to feed GreenMail, which is what the ERP reads. Point it at a new file with
-`npm run mail:tests -- path/to/file.txt`.
+`mail:tests` posts **one file per message** from `test/mails/`, sorted by file name, over SMTP to the
+host in `MAILPIT_SMTP`. The default is `127.0.0.1:1025` (Mailpit), so you **must** set it to `:3025`
+to feed GreenMail, which is what the ERP reads. Send a single file with
+`npm run mail:tests -- test/mails/01-rfq-urgent-stock-verification-for-next-q.txt`.
+
+### The mail file format
+
+Strict on purpose — a wrong line fails immediately with the file name and the line number, instead
+of being guessed at:
+
+```
+From: someone@example.com          <- line 1
+To: sales@example.invalid          <- line 2
+Subject: your subject              <- line 3
+                                   <- line 4 must be blank
+body starts here                   <- line 5 onward
+```
+
+One file = one message, so editing content can never merge two mails or drop a separator. Add a mail
+by copying a file and changing the three header lines.
+
+---
+
+## 3b. Or just run the whole loop — `npm run demo`
+
+```powershell
+npm run demo
+```
+
+The five steps above, in one command, with no flags: start the ERP (idempotent) → install the Inquiry
+surface (idempotent) → send every file in `test/mails/` to GreenMail → pull over IMAP → file the
+Inquiries. Only the last step calls a model, so anything that fails before it costs nothing.
+
+After you change a mail file, that single command is the whole workflow.
 
 ---
 

@@ -9,15 +9,29 @@ dc=(docker compose -p order-review-demo -f "$compose_file")
 "${dc[@]}" up -d
 
 # configurator and create-site are one-shot setup jobs: "exited 0" is success, not a crash.
-for _ in $(seq 1 120); do
-  state="$(docker inspect order-review-demo-create-site-1 --format '{{.State.Status}} {{.State.ExitCode}}' 2>/dev/null || echo 'missing')"
-  case "$state" in
-    "exited 0") break ;;
-    "missing"|"created"|"running") sleep 5 ;;
-    *) echo "site creation failed: $state" >&2; "${dc[@]}" logs create-site; exit 1 ;;
+# Status and exit code are read as two separate fields on purpose. Asking docker inspect for
+# "{{.State.Status}} {{.State.ExitCode}}" prints "running 0" while the job is still working, and
+# matching on a single combined string mistook that for a failure on a fresh volume.
+created=0
+for _ in $(seq 1 240); do
+  status="$(docker inspect order-review-demo-create-site-1 --format '{{.State.Status}}' 2>/dev/null || echo missing)"
+  code="$(docker inspect order-review-demo-create-site-1 --format '{{.State.ExitCode}}' 2>/dev/null || echo -1)"
+  if [ "$status" = "exited" ]; then
+    if [ "$code" = "0" ]; then created=1; break; fi
+    echo "site creation failed with exit code $code" >&2
+    "${dc[@]}" logs --tail 80 create-site >&2
+    exit 1
+  fi
+  case "$status" in
+    created|running|restarting|missing) sleep 5 ;;
+    *) echo "unexpected create-site state: $status" >&2; "${dc[@]}" logs --tail 80 create-site >&2; exit 1 ;;
   esac
 done
-[ "${state:-}" = "exited 0" ] || { echo "site creation exceeded 10 minutes" >&2; exit 1; }
+if [ "$created" != "1" ]; then
+  echo "site creation exceeded 20 minutes; still $status" >&2
+  "${dc[@]}" logs --tail 80 create-site >&2
+  exit 1
+fi
 
 "${dc[@]}" cp "$root/infra/seed.py" backend:/tmp/order-review-seed.py
 "${dc[@]}" cp "$root/infra/seed-run.py" backend:/tmp/order-review-run.py
