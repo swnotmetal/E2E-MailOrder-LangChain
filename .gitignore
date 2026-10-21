@@ -34,3 +34,7 @@ docs/handover-*.md
 
 # Local operator quick start (environment-specific commands) — never pushed
 quickstart.md
+
+# Locally imported agent skills (marketing/branding packs, not part of this repo)
+.claude/
+skills-lock.json

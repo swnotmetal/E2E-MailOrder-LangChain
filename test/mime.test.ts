@@ -71,11 +71,14 @@ test('readSources decodes MIME mail and keeps header identity out of the prose',
   await writeFile(file, await rawMessage());
   try {
     const sources = await readSources(file);
-    assert.deepEqual(sources.map(source => [source.source, source.page]), [['email', 0], ['pdf', 1]]);
+    assert.deepEqual(sources.map(source => [source.source, source.page]), [['email', 0], ['subject', 0], ['sender', 0], ['pdf', 1]]);
     assert.match(sources[0].text, /Customer: Acme Workshop/);
     // The From address and the sender company live in headers only, so prose extraction
     // can never fabricate them; a real mailbox should read them from MIME instead.
     assert.doesNotMatch(sources[0].text, /lucas\.weber@example\.invalid|Muller Auto Service Garage/);
+    // The subject and sender are still available, but as their own sources rather than prose.
+    assert.equal(sources.find(source => source.source === 'sender')?.text, 'lucas.weber@example.invalid');
+    assert.ok(sources.find(source => source.source === 'subject')?.text);
     const extraction = await templateExtractor(sources);
     verifyEvidence(extraction, sources);
     assert.equal(extraction.facts.po.length, 2);

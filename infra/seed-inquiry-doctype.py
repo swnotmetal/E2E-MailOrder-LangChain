@@ -15,8 +15,8 @@ import frappe
 SITE = "frontend"
 SITES_PATH = "/home/frappe/frappe-bench/sites"
 
-STATUSES = ["Pending Review", "Qualified", "Rejected"]
-ACTIONS = [("Qualify", "Qualified"), ("Reject", "Rejected")]
+STATUSES = ["Pending Review", "Qualified", "Rejected", "Screened Out"]
+ACTIONS = [("Qualify", "Qualified"), ("Reject", "Rejected"), ("Screen", "Screened Out")]
 
 _standalone = not getattr(frappe.local, "site", None)
 if _standalone:
@@ -53,11 +53,30 @@ try:
         }).insert(ignore_permissions=True)
         print("DocType Inquiry created")
 
+    # Per-line ERP resolution: what the reviewer needs to see next to the customer's wording.
+    if not frappe.db.exists("DocType", "Inquiry Line"):
+        frappe.get_doc({
+            "doctype": "DocType", "name": "Inquiry Line", "module": "Custom", "custom": 1, "istable": 1,
+            "fields": [
+                {"fieldname": "description", "label": "As written by the customer", "fieldtype": "Data", "in_list_view": 1},
+                {"fieldname": "item", "label": "ERP item", "fieldtype": "Link", "options": "Item", "in_list_view": 1},
+                {"fieldname": "quantity", "label": "Qty", "fieldtype": "Data", "in_list_view": 1},
+                {"fieldname": "uom", "label": "UOM", "fieldtype": "Data"},
+                {"fieldname": "stock", "label": "Recorded stock", "fieldtype": "Float", "in_list_view": 1},
+                {"fieldname": "status", "label": "Resolution", "fieldtype": "Data", "in_list_view": 1},
+            ],
+            "permissions": [],
+        }).insert(ignore_permissions=True)
+        print("DocType Inquiry Line created")
+
     # Fields added after the DocType already existed; appended in place so a seeded site picks
     # them up instead of needing the table rebuilt.
     LATER_FIELDS = [
         {"fieldname": "lead", "label": "Lead", "fieldtype": "Link", "options": "Lead"},
         {"fieldname": "suggested_reply", "label": "Suggested reply (not sent)", "fieldtype": "Text Editor"},
+        {"fieldname": "lines", "label": "Resolved lines", "fieldtype": "Table", "options": "Inquiry Line"},
+        {"fieldname": "quotation", "label": "Draft quotation", "fieldtype": "Link", "options": "Quotation", "read_only": 1},
+        {"fieldname": "screening", "label": "Pre-screen", "fieldtype": "Data", "read_only": 1},
     ]
     inquiry_dt = frappe.get_doc("DocType", "Inquiry")
     have = {f.fieldname for f in inquiry_dt.fields}
@@ -80,8 +99,25 @@ try:
         if not frappe.db.exists("Workflow Action Master", action):
             frappe.get_doc({"doctype": "Workflow Action Master", "workflow_action_name": action}).insert(ignore_permissions=True)
 
-    if frappe.db.exists("Workflow", {"document_type": "Inquiry"}):
-        print("Workflow already exists")
+    workflow_name = frappe.db.get_value("Workflow", {"document_type": "Inquiry"}, "name")
+    if workflow_name:
+        # States added after the workflow was first created (e.g. "Screened Out") must be appended,
+        # otherwise Frappe rejects a document that is saved straight into that state.
+        workflow = frappe.get_doc("Workflow", workflow_name)
+        present = {row.state for row in workflow.states}
+        missing_states = [state for state in STATUSES if state not in present]
+        for state in missing_states:
+            workflow.append("states", {"state": state, "doc_status": "0", "allow_edit": "Sales User"})
+        have_transitions = {(row.state, row.action) for row in workflow.transitions}
+        missing_transitions = [pair for pair in ACTIONS if ("Pending Review", pair[0]) not in have_transitions]
+        for action, next_state in missing_transitions:
+            workflow.append("transitions", {"state": "Pending Review", "action": action, "next_state": next_state,
+                                           "allowed": "Sales User", "allow_self_approval": 1})
+        if missing_states or missing_transitions:
+            workflow.save()
+            print("Workflow topped up:", missing_states, [pair[0] for pair in missing_transitions])
+        else:
+            print("Workflow already exists")
     else:
         frappe.get_doc({
             "doctype": "Workflow",
@@ -98,6 +134,36 @@ try:
             ],
         }).insert(ignore_permissions=True)
         print("Workflow Inquiry Review created")
+
+    # Per-line stock is only meaningful if the demo catalogue is actually stock-tracked. The
+    # original seed created items with is_stock_item=0 and no Bin rows, so every line resolved to
+    # "untracked" and the inventory column told the reviewer nothing.
+    from datetime import date
+
+    OPENING_STOCK = {"FILTER-A10": 12, "FILTER-A20": 4, "THERM-S1": 30, "AMBIG-24V": 7}
+    for code in OPENING_STOCK:
+        if frappe.db.exists("Item", code):
+            frappe.db.set_value("Item", code, "is_stock_item", 1)
+    frappe.db.commit()
+
+    if not frappe.db.exists("Stock Reconciliation", {"purpose": "Opening Stock", "docstatus": 1}):
+        reconciliation = frappe.new_doc("Stock Reconciliation")
+        reconciliation.purpose = "Opening Stock"
+        reconciliation.company = "Nordic Parts Demo"
+        reconciliation.set_posting_time = 1
+        reconciliation.posting_date = str(date.today())
+        reconciliation.posting_time = "00:00:00"
+        # An opening entry balances against an Asset/Liability account, not the usual expense
+        # account, or Frappe raises OpeningEntryAccountError.
+        reconciliation.expense_account = "Temporary Opening - NPD"
+        for code, qty in OPENING_STOCK.items():
+            if frappe.db.exists("Item", code):
+                reconciliation.append("items", {
+                    "item_code": code, "warehouse": "Stores - NPD", "qty": qty, "valuation_rate": 10,
+                })
+        reconciliation.flags.ignore_permissions = True
+        reconciliation.submit()
+        print("Opening stock recorded")
 
     frappe.db.commit()
     print("DONE")

@@ -8,7 +8,7 @@ import { Command } from '@langchain/langgraph';
 import { joinPdfItems, readSources, templateExtractor, verifyEvidence } from '../src/input.js';
 import { workflow } from '../src/workflow.js';
 import { FrappeERP } from '../src/erp.js';
-import { validate, normalizeDate, normalizeQuantity, type Decision, type InquiryDecision } from '../src/domain.js';
+import { validate, normalizeDate, normalizeQuantity, type ErpReviewDecision } from '../src/domain.js';
 import { mockERP } from './mock-erp.js';
 
 async function setup() {
@@ -19,7 +19,7 @@ async function setup() {
 }
 const config=(id='test')=>({configurable:{thread_id:id}});
 async function sources(name='01-clean') {return readSources(`fixtures/${name}.eml`,`fixtures/${name}.pdf`);}
-function approve(s:Record<string,any>,overrides:Partial<Decision>={}) {return {action:'approve',revision:s.revision,actor:'test-operator',reason:'Manually checked development fixture',draft:s.draft,...overrides};}
+function erpApprove(s:Record<string,any>,overrides:Partial<ErpReviewDecision>={}) {return {action:'approve',revision:s.revision,actor:'sales@example.invalid',reason:'submitted in ERPNext (development test)',source:'erpnext' as const,erpDocument:s.order,...overrides};}
 
 test('PDF extraction preserves exact source offsets; forged evidence rejected',async()=>{
   const input=await sources(),e=await templateExtractor(input);
@@ -48,7 +48,8 @@ test('a conforming purchase is proposed to the ERP without a human interrupt',as
     const s=await graph.getState(config('auto-propose'));
     assert.equal(s.values.conformance,'');
     assert.equal(s.values.status,'created');
-    assert.equal(s.tasks.length,0);
+    assert.equal(s.values.order,'MOCK-SO-1');
+    assert.equal(s.tasks.length,1); // paused at awaitErpReview, waiting for the ERP decision
     assert.equal(x.mock.posts,1);
     assert.equal(s.values.audit.length,1);
     assert.equal(s.values.audit[0].action,'auto-propose');
@@ -92,10 +93,10 @@ test('a purchase with any unresolved issue still stops behind the human interrup
     const s=await graph.getState(config('not-conforming'));
     assert.match(s.values.conformance,/^deterministic validation failed: /);
     assert.match(s.values.conformance,/ADDRESS_MISMATCH/);
-    assert.equal(s.values.status,'review');
-    assert.equal(s.tasks[0].interrupts.length,1);
+    assert.equal(s.values.status,'needs-human');
+    assert.equal(s.tasks.length,0);
     assert.equal(x.mock.posts,0);
-    assert.equal(s.values.audit.length,0);
+    assert.equal(x.mock.suggestions,1); // a work item, not an order
   }finally{await x.close();}
 });
 const inquiryText='Hello, we would like 5 FILTER-A10 for our workshop.\n\nBest regards,\nMatti';
@@ -120,7 +121,7 @@ test('dash-separated codes like AMBIG-24V resolve uniquely instead of staying un
     assert.deepEqual(s.values.draft.lines.map((line:any)=>line.item),['','THERM-P1','AMBIG-24V']);
   }finally{await x.close();}
 });
-test('a human-confirmed new customer is created before the order is written',async()=>{
+test('an unknown customer is handed off for a human, never auto-created',async()=>{
   const x=await setup();try{
     const text='Customer: Kiviniemi Oy\nPO: KV-2027-001\nDelivery: 2027-03-05\nAddress: 10 Katu, Helsinki, 00100, Finland\nItem: FILTER-A10 | 5 | Nos';
     const fact=(value:string)=>{const start=text.indexOf(value);return {value,evidence:{source:'email' as const,page:0,start,end:start+value.length,quote:value}};};
@@ -129,19 +130,13 @@ test('a human-confirmed new customer is created before the order is written',asy
       lines:[{description:fact('FILTER-A10'),quantity:fact('5'),unit:fact('Nos')}]}));
     await graph.invoke({sources:[{source:'email',page:0,text}]},config('new-customer'));
     const s=await graph.getState(config('new-customer'));
-    // Stops at review: the customer is unknown, and the AI only proposes, never creates.
-    assert.equal(s.values.status,'review');
-    assert.equal(s.values.newCustomer.name,'Kiviniemi Oy');
-    assert.equal(s.values.newCustomer.address,'10 Katu, Helsinki, 00100, Finland');
+    // The ERP cannot hold an order without a customer, so the work is handed off, never invented.
+    assert.equal(s.values.status,'needs-human');
     assert.equal(x.mock.createdCustomers.length,0);
-    const decision={action:'approve',revision:s.values.revision,actor:'test-operator',reason:'New customer confirmed',draft:s.values.draft,newCustomer:{name:'Kiviniemi Oy',address:'10 Katu, Helsinki, 00100, Finland'}};
-    await graph.invoke(new Command({resume:decision}),config('new-customer'));
-    const done=await graph.getState(config('new-customer'));
-    assert.equal(done.values.status,'created');
-    assert.equal(done.values.order,'MOCK-SO-1');
-    assert.equal(x.mock.createdCustomers.length,1);
-    assert.equal(x.mock.createdCustomers[0].name,'Kiviniemi Oy');
-    assert.equal(done.values.draft.customer,'Kiviniemi Oy');
+    assert.equal(x.mock.posts,0);
+    // The proposal surfaces the sender so a human can create the customer, but nothing is written.
+    assert.equal(s.values.newCustomer.name,'Kiviniemi Oy');
+    assert.equal(s.values.draft.customer,'');
   }finally{await x.close();}
 });
 test('an order that names a catalog-miss item drafts a customer note and files it on approval',async()=>{
@@ -153,17 +148,12 @@ test('an order that names a catalog-miss item drafts a customer note and files i
       lines:[{description:fact('Flux Capacitor X99'),quantity:fact('3'),unit:fact('Nos')}]}));
     await graph.invoke({sources:[{source:'email',page:0,text}]},config('catalog-note'));
     const s=await graph.getState(config('catalog-note'));
-    assert.equal(s.values.status,'review');
+    assert.equal(s.values.status,'needs-human');
     assert.match(s.values.customerNote,/Flux Capacitor X99/);
     assert.match(s.values.customerNote,/checking whether this product can be supplied/);
-    assert.equal(x.mock.suggestions,0);
-    const decision={action:'approve',revision:s.values.revision,actor:'test-operator',reason:'Confirm the item with the customer',draft:s.values.draft,customerNote:s.values.customerNote};
-    await graph.invoke(new Command({resume:decision}),config('catalog-note'));
-    const done=await graph.getState(config('catalog-note'));
-    assert.equal(x.mock.suggestions,1);
-    assert.equal(done.values.status,'review'); // the unresolved item still blocks the order write
+    assert.equal(x.mock.suggestions,1); // the handoff work item carries the customer note
     assert.match(x.mock.todos[0].description,/Flux Capacitor X99/);
-    assert.match(x.mock.todos[0].description,/Suggested reply \(not sent\)/);
+    assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });
 test('a conforming inquiry is filed as an ERP work item without a human interrupt',async()=>{
@@ -209,50 +199,55 @@ test('only an automatic proposal notifies, and a dead notice channel never unwin
     const unclear=workflow(x.erp,x.saver,async()=>({facts:{customer:[],sender:[],location:[],po:[],date:[],address:[]},lines:[],reply:{language:'en'},
       warnings:[{code:'UNRESOLVED_MODEL_EVIDENCE',field:'intent',message:'Confirm intent from the original message'}]}),undefined,notifier);
     await unclear.invoke({sources:[{source:'email',page:0,text:'A fictional unclear email.'}]},config('notify-interrupt'));
-    assert.equal(notices.length,1);assert.equal(x.mock.suggestions,1);
+    assert.equal(notices.length,1);assert.equal(x.mock.suggestions,2); // the unclear message is filed, not notified
     // A dead notification channel must not fail the run or hide the work item already filed.
     fail=true;
     const secondText='Hello, we would like 3 FILTER-A20.\n\nBest regards,\nMatti';
     const second=workflow(x.erp,x.saver,inquiryExtractor(secondText,'FILTER-A20','3'),undefined,notifier);
     await second.invoke({sources:[{source:'email',page:0,text:secondText}]},config('notify-failed'));
     const f=await second.getState(config('notify-failed'));
-    assert.equal(f.values.status,'suggested');assert.equal(x.mock.suggestions,2);assert.equal(notices.length,1);
+    assert.equal(f.values.status,'suggested');assert.equal(x.mock.suggestions,3);assert.equal(notices.length,1);
     assert.equal(f.values.audit.length,2);assert.equal(f.values.audit[1].action,'notify-failed');
   }finally{await x.close();}
 });
-test('clean order interrupts before HTTP write then creates a draft',async()=>{
+test('a clean purchase order is drafted, then waits for the ERP submit or cancel',async()=>{
   const x=await setup();try {
-    await x.graph.invoke({sources:await sources()},config());
-    let s=await x.graph.getState(config());assert.equal(x.mock.posts,0);assert.equal(s.tasks[0].interrupts.length,1);assert.deepEqual(s.values.issues,[]);
+    const graph=workflow(x.erp,x.saver,orderExtractor(cleanOrderText,'10 Test Road, Helsinki, 00100, Finland'));
+    await graph.invoke({sources:[{source:'email',page:0,text:cleanOrderText}]},config('clean-draft'));
+    const s=await graph.getState(config('clean-draft'));
+    assert.equal(x.mock.posts,1);
+    assert.equal(s.values.status,'created');
+    assert.equal(s.values.order,'MOCK-SO-1');
+    assert.equal((s.tasks[0].interrupts[0].value as any).kind,'order-review');
     assert.deepEqual(s.values.availability.map((line:any)=>[line.itemCode,line.status,line.inventory?.totalActualQty]),[['FILTER-A10','recorded-stock',12]]);
-    await x.graph.invoke(new Command({resume:approve(s.values)}),config());
-    s=await x.graph.getState(config());assert.equal(s.values.status,'created');assert.equal(x.mock.orders[0].docstatus,0);
+    await graph.invoke(new Command({resume:erpApprove(s.values)}),config('clean-draft'));
+    const done=await graph.getState(config('clean-draft'));
+    assert.equal(done.values.status,'submitted');
+    assert.equal(done.values.audit[1].action,'human-submitted');
+    assert.equal(done.values.audit[1].actor,'sales@example.invalid');
   }finally{await x.close();}
 });
-test('ambiguous description stays unresolved and approval loops back',async()=>{
+test('ambiguous description stays unresolved and is handed off, never guessed',async()=>{
   const x=await setup();try {
     await x.graph.invoke({sources:await sources('02-ambiguous')},config());const s=await x.graph.getState(config());
     assert.equal(s.values.draft.lines[0].item,'');assert.equal(s.values.availability[0].status,'unresolved');
     assert.ok(s.values.items.some((i:any)=>i.name==='FILTER-A10'));assert.ok(s.values.items.some((i:any)=>i.name==='FILTER-A20'));
-    await x.graph.invoke(new Command({resume:approve(s.values)}),config());assert.equal(x.mock.posts,0);assert.equal((await x.graph.getState(config())).values.status,'review');
+    assert.equal(s.values.status,'needs-human');assert.equal(x.mock.posts,0);assert.equal(x.mock.suggestions,1);
   }finally{await x.close();}
 });
-test('quantity conflict needs an explicit reason; corrected decision persists audit',async()=>{
+test('a quantity conflict is handed off, never auto-resolved',async()=>{
   const x=await setup();try {
     await x.graph.invoke({sources:await sources('03-quantity-conflict')},config());const s=await x.graph.getState(config());
     assert.ok(s.values.issues.some((i:any)=>i.code==='LINE_CONFLICT'));
-    await x.graph.invoke(new Command({resume:approve(s.values,{reason:''})}),config());
-    const paused=await x.graph.getState(config());assert.match((paused.tasks[0].interrupts[0].value as any).feedback,/RESOLUTION_REASON_REQUIRED/);
-    await x.graph.invoke(new Command({resume:approve(s.values)}),config());
-    assert.equal((await x.graph.getState(config())).values.audit.length,1);assert.equal(x.mock.posts,1);
+    assert.equal(s.values.status,'needs-human');
+    assert.equal(x.mock.posts,0);
+    assert.equal(x.mock.suggestions,1);
   }finally{await x.close();}
 });
 test('same PO with identical data across threads creates only one order',async()=>{
   const x=await setup();try {
-    for(const id of ['first','second']) {
-      await x.graph.invoke({sources:await sources()},config(id));const s=await x.graph.getState(config(id));
-      await x.graph.invoke(new Command({resume:approve(s.values)}),config(id));
-    }
+    const graph=workflow(x.erp,x.saver,orderExtractor(cleanOrderText,'10 Test Road, Helsinki, 00100, Finland'));
+    for(const id of ['first','second']) await graph.invoke({sources:[{source:'email',page:0,text:cleanOrderText}]},config(id));
     assert.equal(x.mock.posts,1);
   }finally{await x.close();}
 });
@@ -266,34 +261,39 @@ test('timeout after commit reconciles; concurrent writes honor ERP unique key',a
 test('missing date, address mismatch, unknown customer and invalid quantities are blocked',async()=>{
   const x=await setup();try {
     for(const name of ['06-missing-date','07-address-mismatch','08-unknown-customer','09-invalid-quantity']) {
-      await x.graph.invoke({sources:await sources(name)},config(name));let s=await x.graph.getState(config(name));assert.ok(s.values.issues.length);
-      await x.graph.invoke(new Command({resume:approve(s.values)}),config(name));s=await x.graph.getState(config(name));assert.equal(s.values.status,'review');
+      await x.graph.invoke({sources:await sources(name)},config(name));const s=await x.graph.getState(config(name));
+      assert.ok(s.values.issues.length);assert.equal(s.values.status,'needs-human');
     }
     assert.equal(x.mock.posts,0);
   }finally{await x.close();}
 });
-test('checkpoint reopened after connection closes resumes at approval',async()=>{
+test('a checkpoint reopened after a crash still resumes from the ERP review',async()=>{
   const x=await setup();try {
-    await x.graph.invoke({sources:await sources()},config());x.saver.db.close();
-    x.saver=SqliteSaver.fromConnString(join(x.dir,'checkpoints.sqlite'));x.graph=workflow(x.erp,x.saver);
-    const s=await x.graph.getState(config());await x.graph.invoke(new Command({resume:approve(s.values)}),config());
-    assert.equal((await x.graph.getState(config())).values.status,'created');assert.equal(x.mock.posts,1);x.saver.db.close();
+    const extractor=orderExtractor(cleanOrderText,'10 Test Road, Helsinki, 00100, Finland');
+    await workflow(x.erp,x.saver,extractor).invoke({sources:[{source:'email',page:0,text:cleanOrderText}]},config());x.saver.db.close();
+    x.saver=SqliteSaver.fromConnString(join(x.dir,'checkpoints.sqlite'));x.graph=workflow(x.erp,x.saver,extractor);
+    const s=await x.graph.getState(config());assert.equal(s.values.status,'created');
+    await x.graph.invoke(new Command({resume:erpApprove(s.values)}),config());
+    assert.equal((await x.graph.getState(config())).values.status,'submitted');assert.equal(x.mock.posts,1);x.saver.db.close();
   }finally{await x.close();}
 });
-test('stale review rejected; request-info and rejection never write',async()=>{
+test('a stale or rejected ERP decision never writes',async()=>{
   const x=await setup();try {
-    await x.graph.invoke({sources:await sources()},config('stale'));const s=await x.graph.getState(config('stale'));
-    await x.graph.invoke(new Command({resume:approve(s.values,{revision:'old'})}),config('stale'));
-    assert.match(((await x.graph.getState(config('stale'))).tasks[0].interrupts[0].value as any).feedback,/STALE_APPROVAL/);
-    await x.graph.invoke({sources:await sources()},config('info'));let q=await x.graph.getState(config('info'));
-    await x.graph.invoke(new Command({resume:approve(q.values,{action:'request-info'})}),config('info'));q=await x.graph.getState(config('info'));assert.equal(q.values.status,'needs-info');
-    await x.graph.invoke(new Command({resume:approve(q.values,{action:'reject'})}),config('info'));assert.equal((await x.graph.getState(config('info'))).values.status,'rejected');assert.equal(x.mock.posts,0);
+    const graph=workflow(x.erp,x.saver,orderExtractor(cleanOrderText,'10 Test Road, Helsinki, 00100, Finland'));
+    await graph.invoke({sources:[{source:'email',page:0,text:cleanOrderText}]},config('stale'));
+    const s=await graph.getState(config('stale'));
+    await graph.invoke(new Command({resume:erpApprove(s.values,{revision:'old'})}),config('stale'));
+    const paused=await graph.getState(config('stale'));
+    assert.match((paused.tasks[0].interrupts[0].value as any).feedback,/STALE_APPROVAL/);
+    await graph.invoke(new Command({resume:erpApprove(s.values,{action:'reject',reason:'cancelled in ERPNext'})}),config('stale'));
+    assert.equal((await graph.getState(config('stale'))).values.status,'cancelled');
+    assert.equal(x.mock.posts,1); // only the original draft, nothing from the reject
   }finally{await x.close();}
 });
 test('ERP unavailable leaves a retryable checkpoint',async()=>{
   const x=await setup();try {
     x.mock.failReads(true);await assert.rejects(x.graph.invoke({sources:await sources()},config()),/ERP_HTTP_503/);
-    x.mock.failReads(false);await x.graph.invoke(null,config());assert.equal((await x.graph.getState(config())).values.status,'review');
+    x.mock.failReads(false);await x.graph.invoke(null,config());assert.equal((await x.graph.getState(config())).values.status,'needs-human');
   }finally{await x.close();}
 });
 test('deterministic quantity/date bounds',()=>{
@@ -345,21 +345,12 @@ test('inquiry and conditional intents skip order validation; unclear intent keep
       }
       assert.equal(x.mock.posts,0);
       if(kind==='unclear') {
-        // An unclear intent generates no reply: it stops at the interrupt with an empty draft, and
-        // approving an empty draft is refused rather than filing a nonsense work item.
-        assert.equal(s.values.status,'inquiry-review');
+        // An unclear intent generates no reply: the message becomes a work item with no draft.
+        assert.equal(s.values.status,'needs-human');
         assert.equal(s.values.conformance,'the intent is not a determinate inquiry');
         assert.equal(s.values.inquiry.responseDraft,'');
-        assert.equal((s.tasks[0].interrupts[0].value as any).kind,'inquiry');
-        assert.equal(x.mock.suggestions,0);
-        const empty:InquiryDecision={action:'approve-reply',revision:s.values.revision,actor:'test-operator',reason:'tried to approve an empty reply',responseDraft:''};
-        await graph.invoke(new Command({resume:empty}),config());
-        const refused=await graph.getState(config());
-        assert.equal(refused.values.status,'inquiry-review');assert.equal(x.mock.suggestions,0);
-        assert.match((refused.tasks[0].interrupts[0].value as any).feedback,/REPLY_DRAFT_EMPTY/);
-        const closed:InquiryDecision={action:'close',revision:refused.values.revision,actor:'test-operator',reason:'Not a customer request',responseDraft:''};
-        await graph.invoke(new Command({resume:closed}),config());
-        assert.equal((await graph.getState(config())).values.status,'closed');assert.equal(x.mock.suggestions,0);
+        assert.equal(x.mock.suggestions,1);
+        assert.match(x.mock.todos[0].description,/not answered automatically/);
       } else {
         assert.equal(s.values.conformance,'');assert.equal(s.values.status,'suggested');assert.equal(s.tasks.length,0);
         assert.equal(x.mock.suggestions,1);assert.equal(x.mock.todos[0].reference_name,s.values.inquiry.customer);
@@ -507,7 +498,7 @@ test('missing grounded intent goes to human inquiry review, never the order path
       warnings:[{code:'UNRESOLVED_MODEL_EVIDENCE',field:'intent',message:'Confirm intent from the original message'}]}));
     await graph.invoke({sources:[{source:'email',page:0,text}]},config('unresolved-intent'));
     const values=(await graph.getState(config('unresolved-intent'))).values;
-    assert.equal(values.status,'inquiry-review');assert.equal(values.inquiry.intent,'unclear');assert.equal(x.mock.posts,0);
+    assert.equal(values.status,'needs-human');assert.equal(values.inquiry.intent,'unclear');assert.equal(x.mock.posts,0);
     assert.equal(values.inquiry.responseDraft,'');
     assert.ok(values.inquiry.needs.some((need:string)=>need.includes('not a clear purchase or inquiry')));
   }finally{await x.close();}
@@ -520,24 +511,14 @@ test('same PO with changed approved content is never silently reused',async()=>{
     await assert.rejects(x.erp.createDraft(changed),/DUPLICATE_CHANGED/);assert.equal(x.mock.posts,1);
   }finally{await x.close();}
 });
-test('human selection resolves an ambiguous model with audit trail',async()=>{
-  const x=await setup();try {
-    await x.graph.invoke({sources:await sources('02-ambiguous')},config());const s=await x.graph.getState(config());
-    const d=structuredClone(s.values.draft);d.lines[0].item='FILTER-A20';
-    await x.graph.invoke(new Command({resume:approve(s.values,{draft:d,reason:'Customer confirmed A20 in a follow-up (development test)'})}),config());
-    const done=await x.graph.getState(config());assert.equal(done.values.status,'created');assert.equal(done.values.audit[0].draft.lines[0].item,'FILTER-A20');
-  }finally{await x.close();}
-});
 
-test('permanent duplicate conflict returns to human review instead of a retry trap',async()=>{
+test('a duplicate PO is handed off instead of entering a retry trap',async()=>{
   const x=await setup();try {
     await x.graph.invoke({sources:await sources()},config('a'));const a=await x.graph.getState(config('a'));
     await x.erp.createDraft(a.values.draft);
     await x.graph.invoke({sources:await sources()},config('b'));const b=await x.graph.getState(config('b'));
-    const changed=structuredClone(b.values.draft);changed.lines[0].quantity='7';
-    await x.graph.invoke(new Command({resume:approve(b.values,{draft:changed})}),config('b'));
-    const conflict=await x.graph.getState(config('b'));assert.equal(conflict.values.status,'review');
-    await x.graph.invoke(new Command({resume:approve(conflict.values,{action:'reject'})}),config('b'));
-    assert.equal((await x.graph.getState(config('b'))).values.status,'rejected');assert.equal(x.mock.posts,1);
+    assert.equal(b.values.status,'needs-human');
+    assert.ok(b.values.issues.some((i:any)=>i.code==='DUPLICATE_PO'));
+    assert.equal(x.mock.posts,1);
   }finally{await x.close();}
 });

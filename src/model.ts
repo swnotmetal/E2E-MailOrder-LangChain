@@ -21,18 +21,35 @@ const toolSchema = {type:'object',additionalProperties:false,required:['facts','
   lines:{type:'array',items:{type:'object',additionalProperties:false,required:['description','quantity','unit'],properties:{description:spanSchema,quantity:spanSchema,unit:spanSchema}}}}};
 export function verifyModelProposal(raw:unknown,sources:Source[]):Extraction {
   const p=proposal.parse(raw);
-  function fact(s:z.infer<typeof span>):Fact {
+  // A fact the model cannot ground in its own quote is dropped, not fatal. One unprovable display
+  // name (typically derived from an email address) must not discard the rest of the message; the
+  // drop is reported as a warning so the reviewer sees what is missing.
+  const dropped:string[]=[];
+  function fact(s:z.infer<typeof span>,field:string):Fact|null {
     const source=sources[s.sourceIndex];
     if(!source) throw Error('MODEL_SOURCE_NOT_FOUND');
     const start=source.text.indexOf(s.quote);
     if(start<0) throw Error('MODEL_QUOTE_NOT_FOUND');
     const within=s.quote.indexOf(s.value);
-    if(within<0) throw Error('MODEL_VALUE_NOT_IN_QUOTE');
+    if(within<0) {dropped.push(field);return null;}
     const offset=start+within;
     return {value:s.value.trim(),evidence:{source:source.source,page:source.page,start:offset,end:offset+s.value.length,quote:s.value}};
   }
-  const result:Extraction={facts:{customer:p.facts.customer.map(fact),sender:p.facts.sender.map(fact),location:p.facts.location.map(fact),po:p.facts.po.map(fact),date:p.facts.date.map(fact),address:p.facts.address.map(fact)},
-    lines:p.lines.map(l=>({description:fact(l.description),quantity:fact(l.quantity),unit:fact(l.unit)}))};
+  // A line survives only if all three parts are grounded: a quantity without provable evidence is
+  // worse than a missing line, because it looks authoritative.
+  const keep=(list:(Fact|null)[])=>list.filter((item):item is Fact=>item!==null);
+  const result:Extraction={facts:{
+    customer:keep(p.facts.customer.map(s=>fact(s,'customer'))),
+    sender:keep(p.facts.sender.map(s=>fact(s,'sender'))),
+    location:keep(p.facts.location.map(s=>fact(s,'location'))),
+    po:keep(p.facts.po.map(s=>fact(s,'po'))),
+    date:keep(p.facts.date.map(s=>fact(s,'date'))),
+    address:keep(p.facts.address.map(s=>fact(s,'address')))},
+    lines:p.lines.flatMap(l=>{
+      const description=fact(l.description,'lines.description'),quantity=fact(l.quantity,'lines.quantity'),unit=fact(l.unit,'lines.unit');
+      return description&&quantity&&unit?[{description,quantity,unit}]:[];
+    })};
+  if(dropped.length) result.warnings=[...new Set(dropped)].map(field=>({code:'UNRESOLVED_MODEL_EVIDENCE' as const,field,message:`Confirm ${field} from the original message`}));
   verifyEvidence(result,sources);return result;
 }
 
@@ -131,7 +148,10 @@ export function verifyMailProposal(raw:unknown,sources:Source[]):Extraction {
       if(matches.length===1)s={...s,value:matches[0][0]};
     }
     const within=s.quote.indexOf(s.value);
-    if(within<0) throw Error('MODEL_VALUE_NOT_IN_QUOTE');
+    // A value the model cannot ground in its own quote (typically a display name derived from an
+    // email address: "Li Wei" cited against "li.wei@…") must not kill the whole message. Returning
+    // no candidates degrades that single fact to UNRESOLVED_MODEL_EVIDENCE and leaves it for a human.
+    if(within<0) return [];
     const starts:number[]=[];
     for(let start=source.text.indexOf(s.quote);start>=0;start=source.text.indexOf(s.quote,start+1)) starts.push(start);
     if(!starts.length) throw Error('MODEL_QUOTE_NOT_FOUND');
@@ -142,7 +162,12 @@ export function verifyMailProposal(raw:unknown,sources:Source[]):Extraction {
   // Repeated names and identifiers are still valid evidence. Scalar facts use the first exact
   // occurrence; product-line fields below use their closest combination to preserve association.
   const grounded=(s:Span)=>candidates(s)[0].fact;
-  const safeCandidates=(s:Span,path:string)=>{try{return candidates(s);}catch{
+  const safeCandidates=(s:Span,path:string)=>{try{
+    const found=candidates(s);
+    // An empty result means the value could not be grounded; it must be reported, not dropped silently.
+    if(!found.length) throw Error('UNGROUNDED');
+    return found;
+  }catch{
     warnings.push({code:'UNRESOLVED_MODEL_EVIDENCE',field:path,message:`Confirm ${path} from the original message`});return [];
   }};
   const safeGrounded=(s:Span,path:string)=>safeCandidates(s,path)[0]?.fact;

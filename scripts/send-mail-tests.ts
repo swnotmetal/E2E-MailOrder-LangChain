@@ -8,8 +8,14 @@ const endpoint = process.env.MAILPIT_SMTP ?? '127.0.0.1:1025';
 const [host, port] = endpoint.split(':');
 
 const text = await readFile(source, 'utf8');
-// Blocks are separated by a line of three or more dashes.
-const blocks = text.split(/^\s*-{3,}\s*$/m).map(block => block.trim()).filter(Boolean);
+// Blocks are separated by a line of three or more dashes, but a hand-edited file often loses one.
+// Every message starts with `From:`, so also split there: a missing separator then still yields
+// one message per sender instead of two senders merged into one garbled mail.
+const blocks = text
+  .split(/^\s*-{3,}\s*$/m)
+  .flatMap(part => part.split(/^(?=From:)/m))
+  .map(block => block.trim())
+  .filter(Boolean);
 if (!blocks.length) throw Error('NO_MESSAGES: expected blocks separated by a line of dashes');
 
 const messages = blocks.map((block, index) => {
