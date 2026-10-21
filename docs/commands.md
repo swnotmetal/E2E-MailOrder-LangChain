@@ -57,7 +57,9 @@ Wait for exactly:
 ```
 Local ERPNext demo is ready on http://127.0.0.1:8080. API credentials are in ignored .env.erp.
 ```
-
+Status line reads `creating the site: 300s elapsed, 97.0% cpu` while it works. `bench new-site`
+prints nothing for minutes at a time, so CPU is the only honest progress signal. Expect ~3-5 minutes
+on a 4-core desktop and **15-30 minutes on a 2-vCPU Codespaces machine**; the script gives up after 45.
 Re-running it is safe and fast when the site already exists.
 
 ---
@@ -224,9 +226,14 @@ SQLite checkpoints all survive, so the next `start-wsl.ps1` is a few seconds.
 
 ```powershell
 npm run check        # tsc --noEmit: types only
-npm test             # 61 tests, tsx --test test/*.test.ts
+npm test             # 75 tests, tsx --test test/*.test.ts
 npm run failure-lab  # drives the graph against an in-process mock ERP
+npm run doctor       # read-only: config, ERP reachability, token, Inquiry DocType, GreenMail ports
 ```
+
+`doctor` is the first thing to run when something does not work. It is read-only and calls no model:
+it names the broken layer instead of leaving you to guess between config, network, permissions and
+the mailbox. Exit code 1 means a blocking problem.
 
 These are what CI runs (`.github/workflows/ci.yml`). They never touch ERPNext, GreenMail or Gemini:
 deterministic tests make no live model calls, which is why they are safe to run constantly.

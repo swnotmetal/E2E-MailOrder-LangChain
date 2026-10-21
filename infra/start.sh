@@ -13,7 +13,7 @@ dc=(docker compose -p order-review-demo -f "$compose_file")
 # "{{.State.Status}} {{.State.ExitCode}}" prints "running 0" while the job is still working, and
 # matching on a single combined string mistook that for a failure on a fresh volume.
 created=0
-for _ in $(seq 1 240); do
+for _ in $(seq 1 540); do
   status="$(docker inspect order-review-demo-create-site-1 --format '{{.State.Status}}' 2>/dev/null || echo missing)"
   code="$(docker inspect order-review-demo-create-site-1 --format '{{.State.ExitCode}}' 2>/dev/null || echo -1)"
   if [ "$status" = "exited" ]; then
@@ -23,12 +23,23 @@ for _ in $(seq 1 240); do
     exit 1
   fi
   case "$status" in
-    created|running|restarting|missing) sleep 5 ;;
+    created|running|restarting|missing)
+      # Silence looks like a hang: `bench new-site --install-app erpnext` takes 5-30 minutes and
+      # prints nothing while it works. CPU is the only honest progress signal here, because the
+      # last log line stops changing the moment bench starts.
+      if [ $((_ % 6)) -eq 0 ]; then
+        cpu="$(docker stats --no-stream --format '{{.CPUPerc}}' order-review-demo-create-site-1 2>/dev/null || true)"
+        printf '  creating the site: %ss elapsed, %s cpu\n' "$((_ * 5))" "${cpu:-unknown}"
+      fi
+      sleep 5
+      ;;
     *) echo "unexpected create-site state: $status" >&2; "${dc[@]}" logs --tail 80 create-site >&2; exit 1 ;;
   esac
 done
 if [ "$created" != "1" ]; then
-  echo "site creation exceeded 20 minutes; still $status" >&2
+  echo "site creation exceeded 45 minutes (status $status). Check:" >&2
+  echo "  docker top order-review-demo-create-site-1      # is bench actually working?" >&2
+  echo "  docker logs --tail 80 order-review-demo-db-1   # did the database come up?" >&2
   "${dc[@]}" logs --tail 80 create-site >&2
   exit 1
 fi
